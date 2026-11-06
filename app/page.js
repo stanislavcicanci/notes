@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, memo, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -12,7 +12,7 @@ import {
    CONSTANTS
    ============================================================ */
 const G = '#42A879'
-const KEY = 'notes-workspace-v11'
+const KEY = 'notes-workspace-v25'
 const COLORS = ['#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444', '#202522']
 const TXT_COLORS = ['#202522', '#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444']
 const HIGHLIGHTS = ['#FEF3C7', '#DBEAFE', '#DCFCE7', '#FCE7F3', '#EDE9FE', 'transparent']
@@ -31,43 +31,87 @@ function hasText(html) {
 
 function sanitizeHtml(html) {
   if (typeof document === 'undefined') return html
-  const tpl = document.createElement('template')
-  tpl.innerHTML = html
-  const ALLOWED = new Set([
-    'B', 'I', 'U', 'S', 'STRONG', 'EM', 'BR', 'DIV', 'P', 'SPAN',
-    'H1', 'H2', 'H3', 'H4', 'UL', 'OL', 'LI', 'MARK', 'SUB', 'SUP', 'FONT'
-  ])
-  const walk = node => {
-    ;[...node.childNodes].forEach(child => {
-      if (child.nodeType === 1) {
-        if (!ALLOWED.has(child.tagName)) {
-          child.replaceWith(document.createTextNode(child.textContent || ''))
-          return
-        }
-        ;[...child.attributes].forEach(attr => {
-          if (attr.name === 'style') {
-            const keep = []
-            const st = child.style
-            if (st.color) keep.push(`color:${st.color}`)
-            if (st.backgroundColor) keep.push(`background-color:${st.backgroundColor}`)
-            if (st.fontSize) keep.push(`font-size:${st.fontSize}`)
-            if (st.fontWeight) keep.push(`font-weight:${st.fontWeight}`)
-            if (st.fontStyle) keep.push(`font-style:${st.fontStyle}`)
-            if (st.textDecoration) keep.push(`text-decoration:${st.textDecoration}`)
-            if (keep.length) child.setAttribute('style', keep.join(';'))
-            else child.removeAttribute('style')
-          } else if (attr.name === 'color' || attr.name === 'size') {
-            if (child.tagName !== 'FONT') child.removeAttribute(attr.name)
-          } else {
-            child.removeAttribute(attr.name)
+  try {
+    const tpl = document.createElement('template')
+    tpl.innerHTML = html
+    const ALLOWED = new Set([
+      'B', 'I', 'U', 'S', 'STRONG', 'EM', 'BR', 'DIV', 'P', 'SPAN',
+      'H1', 'H2', 'H3', 'H4', 'UL', 'OL', 'LI', 'MARK', 'SUB', 'SUP', 'FONT'
+    ])
+    const walk = node => {
+      ;[...node.childNodes].forEach(child => {
+        if (child.nodeType === 1) {
+          if (!ALLOWED.has(child.tagName)) {
+            child.replaceWith(document.createTextNode(child.textContent || ''))
+            return
           }
-        })
-        walk(child)
-      }
-    })
+          ;[...child.attributes].forEach(attr => {
+            if (attr.name === 'style') {
+              const keep = []
+              const st = child.style
+              if (st.color) keep.push(`color:${st.color}`)
+              if (st.backgroundColor) keep.push(`background-color:${st.backgroundColor}`)
+              if (st.fontSize) keep.push(`font-size:${st.fontSize}`)
+              if (st.fontWeight) keep.push(`font-weight:${st.fontWeight}`)
+              if (st.fontStyle) keep.push(`font-style:${st.fontStyle}`)
+              if (st.textDecoration) keep.push(`text-decoration:${st.textDecoration}`)
+              if (keep.length) child.setAttribute('style', keep.join(';'))
+              else child.removeAttribute('style')
+            } else if (attr.name === 'color' || attr.name === 'size') {
+              if (child.tagName !== 'FONT') child.removeAttribute(attr.name)
+            } else {
+              child.removeAttribute(attr.name)
+            }
+          })
+          walk(child)
+        }
+      })
+    }
+    walk(tpl.content)
+    return tpl.innerHTML
+  } catch (e) {
+    return ''
   }
-  walk(tpl.content)
-  return tpl.innerHTML
+}
+
+function normalizeProjectTopics(rawTopics) {
+  if (!Array.isArray(rawTopics) || rawTopics.length > 10000) throw new Error('Invalid topics')
+  const ids = new Set()
+  const cleanText = value => typeof value === 'string' ? sanitizeHtml(value) : ''
+  return rawTopics.map((t, i) => {
+    if (!t || typeof t !== 'object' || typeof t.id !== 'string' ||
+        !Number.isFinite(t.x) || !Number.isFinite(t.y) || !Array.isArray(t.subs)) {
+      throw new Error('Invalid topic structure')
+    }
+    if (ids.has(t.id)) throw new Error('Duplicate topic id')
+    ids.add(t.id)
+    const subs = t.subs.slice(0, 3)
+    while (subs.length < 3) subs.push(null)
+    return {
+      ...t,
+      id: t.id,
+      x: Math.max(-1000000, Math.min(1000000, t.x)),
+      y: Math.max(-1000000, Math.min(1000000, t.y)),
+      title: cleanText(t.title),
+      color: COLORS.includes(t.color) ? t.color : G,
+      role: t.role === 'comment' ? 'comment' : (i === 0 ? 'topic' : 'comment'),
+      lineageId: typeof t.lineageId === 'string' ? t.lineageId : t.id,
+      subs: subs.map(sub => {
+        if (sub == null) return null
+        if (typeof sub !== 'object' || typeof sub.id !== 'string' || !Array.isArray(sub.notes)) {
+          throw new Error('Invalid subtopic')
+        }
+        return {
+          id: sub.id,
+          html: cleanText(sub.html),
+          notes: sub.notes.slice(0, 1000).map(note => {
+            if (!note || typeof note.id !== 'string') throw new Error('Invalid note')
+            return { id: note.id, html: cleanText(note.html) }
+          })
+        }
+      })
+    }
+  })
 }
 
 /* ============================================================
@@ -96,7 +140,7 @@ const cloneNode = (t, dx = 40) => {
 function GlobalStyles() {
   return (
     <>
-      <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+      <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         html, body {
@@ -105,19 +149,22 @@ function GlobalStyles() {
           font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
           -webkit-font-smoothing: antialiased;
         }
-        * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; outline: none !important; }
+        * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+        button:focus-visible, input:focus-visible, [contenteditable]:focus-visible { outline: 2px solid #42A879; outline-offset: 2px; }
+        [data-editable] { user-select: text; -webkit-user-select: text; overflow-wrap: anywhere; }
+        body { overflow: hidden; }
         [contenteditable]:empty:before {
           content: attr(data-placeholder);
           color: #B0B7B2;
           pointer-events: none;
         }
+        [contenteditable] h1 { font-size: 32px; font-weight: 700; margin: 0.2em 0; }
+        [contenteditable] h2 { font-size: 24px; font-weight: 600; margin: 0.2em 0; }
+        [contenteditable] h3 { font-size: 20px; font-weight: 600; margin: 0.2em 0; }
         [contenteditable] b, [contenteditable] strong { font-weight: 700; }
         [contenteditable] i, [contenteditable] em { font-style: italic; }
         [contenteditable] u { text-decoration: underline; }
         [contenteditable] s, [contenteditable] strike { text-decoration: line-through; }
-        [contenteditable] h1 { font-size: 1.8em; font-weight: 700; margin: 0.2em 0; }
-        [contenteditable] h2 { font-size: 1.4em; font-weight: 600; margin: 0.2em 0; }
-        [contenteditable] h3 { font-size: 1.15em; font-weight: 600; margin: 0.2em 0; }
         [contenteditable] ul, [contenteditable] ol { padding-left: 1.2em; margin: 0.2em 0; }
         [contenteditable] p { margin: 0.15em 0; }
         ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -129,83 +176,89 @@ function GlobalStyles() {
 }
 
 /* ============================================================
-   EDITABLE — Mobile-First
+   EDITABLE — Salvare DOAR la Blur (Cursor Fix)
    ============================================================ */
-const Editable = memo(function Editable({ html, onSave, className = '', placeholder = '' }) {
+const Editable = memo(function Editable({ html, onSave, onEditStart, targetId, highlighted = false, className = '', placeholder = '' }) {
   const ref = useRef(null)
-  const lastSavedHtml = useRef(html)
-  const timer = useRef(null)
+  const lastSavedHtml = useRef(html || '')
   const isFocused = useRef(false)
+  const timer = useRef(null)
 
-  useEffect(() => {
-    if (!isFocused.current && ref.current && ref.current.innerHTML !== html) {
-      ref.current.innerHTML = html
-      lastSavedHtml.current = html
+  useLayoutEffect(() => {
+    if (!ref.current) return
+    if (!isFocused.current && ref.current.innerHTML !== (html || '')) {
+      ref.current.innerHTML = html || ''
+      lastSavedHtml.current = html || ''
     }
   }, [html])
 
-  const commit = () => {
+  const commit = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = null
     if (!ref.current) return
-    try {
-      const currentHtml = ref.current.innerHTML || ''
-      const clean = sanitizeHtml(currentHtml)
-      if (clean !== lastSavedHtml.current) {
-        lastSavedHtml.current = clean
-        onSave(clean)
-      }
-    } catch (err) {
-      console.warn("Save interrupted", err)
+    const currentHtml = sanitizeHtml(ref.current.innerHTML || '')
+    if (currentHtml !== lastSavedHtml.current) {
+      lastSavedHtml.current = currentHtml
+      onSave(currentHtml)
     }
-  }
+  }, [onSave])
 
-  useEffect(() => {
-    return () => {
-      if (timer.current) clearTimeout(timer.current)
-    }
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current)
   }, [])
 
   return (
     <div
       ref={ref}
+      id={targetId ? `editable-${targetId}` : undefined}
       contentEditable
       suppressContentEditableWarning
-      spellCheck={false}
+      spellCheck
+      role="textbox"
+      aria-multiline="true"
       data-editable
       data-placeholder={placeholder}
-      className={`outline-none focus:outline-none ${className}`}
+      className={`focus:outline-none ${highlighted ? 'rounded-sm ring-2 ring-[#42A879] bg-[#42A879]/10' : ''} ${className}`}
       onPointerDown={e => e.stopPropagation()}
       onMouseDown={e => e.stopPropagation()}
       onTouchStart={e => e.stopPropagation()}
-      onFocus={() => { isFocused.current = true }}
-      onBlur={() => {
-        isFocused.current = false
+      onFocus={() => {
+        if (!isFocused.current) {
+          isFocused.current = true
+          onEditStart?.()
+        }
+      }}
+      onInput={() => {
         if (timer.current) clearTimeout(timer.current)
+        timer.current = setTimeout(commit, 500)
+      }}
+      onBlur={() => {
         commit()
+        isFocused.current = false
       }}
       onPaste={e => {
         e.preventDefault()
         const text = e.clipboardData.getData('text/plain')
         document.execCommand('insertText', false, text)
       }}
-      onInput={() => {
-        if (timer.current) clearTimeout(timer.current)
-        timer.current = setTimeout(commit, 350)
-      }}
-      dangerouslySetInnerHTML={{ __html: html || '' }}
     />
   )
 })
 
 /* ============================================================
-   BUTTONS (Fix pentru focus și hover)
+   BUTTONS
    ============================================================ */
 const Btn = ({ onClick, children, active, title, disabled }) => (
   <motion.button
     whileTap={{ scale: 0.9 }}
     title={title} disabled={disabled} onClick={onClick}
     className={`h-9 w-9 grid place-items-center rounded-lg transition-all shrink-0 select-none outline-none focus:outline-none focus:ring-0 ${
-      disabled ? 'opacity-30 cursor-not-allowed' : 'hover:bg-[#F7FAF8]'
-    } ${active ? 'text-white bg-[#42A879] shadow-sm hover:bg-[#42A879]' : 'text-[#202522]'}`}
+      disabled ? 'opacity-30 cursor-not-allowed' : ''
+    } ${
+      active 
+        ? 'text-white !bg-[#42A879] shadow-sm hover:!bg-[#42A879]' 
+        : 'text-[#202522] hover:bg-[#F7FAF8]'
+    }`}
   >{children}</motion.button>
 )
 
@@ -215,7 +268,9 @@ const FmtBtn = ({ onClick, children, active, title }) => (
     onMouseDown={e => e.preventDefault()}
     onClick={onClick} title={title}
     className={`h-8 w-8 grid place-items-center rounded-md transition-colors shrink-0 outline-none focus:outline-none focus:ring-0 ${
-      active ? 'bg-[#42A879] text-white shadow-sm' : 'hover:bg-[#F0F4F1] text-[#202522]'
+      active 
+        ? 'text-white !bg-[#42A879] shadow-sm hover:!bg-[#42A879]' 
+        : 'text-[#202522] hover:bg-[#F0F4F1]'
     }`}
   >{children}</motion.button>
 )
@@ -281,7 +336,7 @@ function PremiumSelect({ value, onChange, options, icon, label, width = "min-w-[
 /* ============================================================
    PREMIUM COLOR PICKER
    ============================================================ */
-function ColorPicker({ colors, onChange, icon, title, isHighlight }) {
+function ColorPicker({ colors, onChange, icon, title }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
 
@@ -381,8 +436,14 @@ function SelectionToolbar() {
   const run = (cmd, val = null) => {
     document.execCommand(cmd, false, val)
     queryMarks()
-    const ed = editableRef.current
-    if (ed) ed.dispatchEvent(new FocusEvent('blur', { bubbles: false }))
+  }
+
+  const close = () => {
+    if (editableRef.current) {
+      editableRef.current.blur()
+    }
+    setState(null)
+    editableRef.current = null
   }
 
   if (!state || typeof document === 'undefined') return null
@@ -398,12 +459,24 @@ function SelectionToolbar() {
   ]
 
   const sizeOptions = [
-    { label: 'Small', value: '2' },
-    { label: 'Normal', value: '3' },
-    { label: 'Large', value: '4' },
-    { label: 'XL', value: '5' },
-    { label: 'XXL', value: '6' },
+    { label: '12px', value: '12px' },
+    { label: '14px', value: '14px' },
+    { label: '16px', value: '16px' },
+    { label: '20px', value: '20px' },
+    { label: '24px', value: '24px' },
+    { label: '32px', value: '32px' },
+    { label: '40px', value: '40px' },
   ]
+
+  const applyFontSize = (size) => {
+    document.execCommand('fontSize', false, '7')
+    const fontElements = editableRef.current.querySelectorAll('font[size="7"]')
+    fontElements.forEach(el => {
+      el.removeAttribute('size')
+      el.style.fontSize = size
+    })
+    queryMarks()
+  }
 
   return createPortal(
     <motion.div
@@ -411,7 +484,7 @@ function SelectionToolbar() {
       initial={{ opacity: 0, y: 4, scale: 0.96 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.15 }}
-      onMouseDown={e => e.preventDefault()}
+      onMouseDown={e => e.preventDefault()} 
       onPointerDown={e => e.stopPropagation()}
       style={{ position: 'fixed', left, top, zIndex: 10000 }}
       className="flex items-center gap-0.5 bg-white border border-[#DDE4DF] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.08)] p-1 max-w-[96vw] overflow-visible text-[#202522]"
@@ -422,12 +495,12 @@ function SelectionToolbar() {
       <FmtBtn active={marks.strike} title="Strike" onClick={() => run('strikeThrough')}>
         <span className="text-[13px] font-semibold line-through">S</span>
       </FmtBtn>
-      
+
       <div className="w-px h-5 bg-[#DDE4DF] mx-1 shrink-0" />
-      
+
       <PremiumSelect
         options={formatOptions}
-        label="Text"
+        label="Body Text"
         icon={<Type size={14} className="text-[#8B928E]" />}
         value=""
         onChange={val => run('formatBlock', val)}
@@ -450,7 +523,6 @@ function SelectionToolbar() {
         colors={HIGHLIGHTS}
         onChange={c => run('hiliteColor', c)}
         title="Highlight"
-        isHighlight
         icon={
           <div className="relative">
             <Highlighter size={15} className="text-[#202522]" />
@@ -463,12 +535,12 @@ function SelectionToolbar() {
         options={sizeOptions}
         label="Size"
         value=""
-        onChange={val => run('fontSize', val)}
+        onChange={applyFontSize}
         width="min-w-[80px]"
       />
 
       <div className="w-px h-5 bg-[#DDE4DF] mx-1 shrink-0" />
-      <FmtBtn title="Clear formatting" onClick={() => run('removeFormat')}><X size={15} /></FmtBtn>
+      <FmtBtn title="Close editor" onClick={close}><X size={15} /></FmtBtn>
     </motion.div>,
     document.body
   )
@@ -478,10 +550,10 @@ function SelectionToolbar() {
    NODE CARD
    ============================================================ */
 const NodeRow = memo(function NodeRow({
-  t, isSel,
+  t, isSel, searchHit,
   onStartDrag, onFocus, onDup, onDelete,
   onChangeColor, onTitleSave, onSubSave, onSubAdd, onSubDelete,
-  onNoteAdd, onNoteSave, onNoteDelete,
+  onNoteAdd, onNoteSave, onNoteDelete, onEditStart,
   onAddRight, onAddBelow
 }) {
   const accent = t.color || G
@@ -530,19 +602,22 @@ const NodeRow = memo(function NodeRow({
       <div className="flex items-start gap-1 mb-3">
         <Editable
           html={t.title}
+          targetId={t.id}
+          highlighted={searchHit === t.id}
+          onEditStart={onEditStart}
           onSave={h => onTitleSave(t.id, h)}
           className={`${isComment ? 'text-base' : 'text-xl'} font-semibold min-w-[120px] flex-1 cursor-text`}
           placeholder={titlePlaceholder}
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-3 items-stretch min-h-[100px]">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 items-stretch min-h-[100px]">
         {t.subs.map((s, si) => {
           const subReady = s ? hasText(s.html) : false
           return (
             <div
               key={s ? s.id : `empty-${si}`}
-              className="group/sub pl-3 flex flex-col rounded-sm"
+              className="group/sub pl-3 py-1 flex flex-col rounded-sm min-w-0"
               style={{ borderLeft: `2px dashed ${accent}33` }}
             >
               {s ? (
@@ -550,6 +625,9 @@ const NodeRow = memo(function NodeRow({
                   <div className="flex items-start gap-1">
                     <Editable
                       html={s.html}
+                      targetId={s.id}
+                      highlighted={searchHit === s.id}
+                      onEditStart={onEditStart}
                       onSave={h => onSubSave(t.id, s.id, h)}
                       className={`flex-1 ${isComment ? 'text-[13px]' : 'text-[15px]'} min-h-[22px] cursor-text font-medium`}
                       placeholder="Subtopic…"
@@ -557,7 +635,7 @@ const NodeRow = memo(function NodeRow({
                     <button
                       title="Delete subtopic"
                       onClick={() => onSubDelete(t.id, s.id)}
-                      className="text-[#8B928E] hover:text-red-500 opacity-0 group-hover/sub:opacity-100 shrink-0"
+                      className="text-[#8B928E] hover:text-red-500 opacity-100 sm:opacity-0 sm:group-hover/sub:opacity-100 shrink-0 min-w-8 min-h-8 grid place-items-center"
                     ><X size={12} /></button>
                   </div>
                   {s.notes.map(n => (
@@ -568,20 +646,23 @@ const NodeRow = memo(function NodeRow({
                       <StickyNote size={11} className="mt-0.5 shrink-0" style={{ color: accent }} />
                       <Editable
                         html={n.html}
+                        targetId={n.id}
+                        highlighted={searchHit === n.id}
+                        onEditStart={onEditStart}
                         onSave={h => onNoteSave(t.id, s.id, n.id, h)}
                         className="flex-1 min-h-[16px] cursor-text"
                         placeholder="Note"
                       />
                       <button
                         onClick={() => onNoteDelete(t.id, s.id, n.id)}
-                        className="text-[#8B928E] hover:text-red-500 opacity-0 group-hover/note:opacity-100 shrink-0"
+                        className="text-[#8B928E] hover:text-red-500 opacity-100 sm:opacity-0 sm:group-hover/note:opacity-100 shrink-0 min-w-8 min-h-8 grid place-items-center"
                       ><X size={12} /></button>
                     </div>
                   ))}
                   <button
                     onClick={() => onNoteAdd(t.id, s.id)}
                     disabled={!subReady}
-                    title={subReady ? 'Add note' : 'Write the subtopic first'}
+                    title={subReady ? 'Add another note' : 'Write the subtopic first'}
                     className={`mt-auto pt-2 flex items-center gap-1 text-xs ${subReady ? 'hover:opacity-100' : 'opacity-30 cursor-not-allowed'}`}
                     style={{ color: accent }}
                   >
@@ -733,16 +814,19 @@ export default function Page() {
   const [draft, setDraft] = useState(null)
   const [sel, setSel] = useState(null)
   const [saved, setSaved] = useState(true)
+  const [saveError, setSaveError] = useState(false)
   const [anim, setAnim] = useState(false)
   const [ask, setAsk] = useState(null)
   const [focus, setFocus] = useState(null)
   const [search, setSearch] = useState('')
   const [showSearch, setShowSearch] = useState(false)
+  const [searchHit, setSearchHit] = useState(null)
 
   const past = useRef([]), future = useRef([])
   const drag = useRef(null), space = useRef(false), pinch = useRef(null)
   const cv = useRef(null), dr = useRef(null), fileRef = useRef(null)
   const ready = useRef(false)
+  const loadFailed = useRef(false)
   const docR = useRef(doc); docR.current = doc
   const viewR = useRef(view); viewR.current = view
 
@@ -770,34 +854,43 @@ export default function Page() {
     try {
       const s = JSON.parse(localStorage.getItem(KEY))
       if (s) {
-        const topics = (s.topics || []).map((t, i) => {
-          const subs = Array.isArray(t.subs) ? [...t.subs] : []
-          while (subs.length < 3) subs.push(null)
-          const lineageId = t.lineageId || t.id
-          return {
-            color: G,
-            role: i === 0 ? 'topic' : (t.role || (t.color && t.color !== G ? 'topic' : 'comment')),
-            ...t,
-            lineageId,
-            subs
-          }
-        })
+        const topics = normalizeProjectTopics(s.topics || [])
         setDoc(topics)
-        setView(s.view || { x: 0, y: 0, z: 1 })
+        const v = s.view
+        if (v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z)) {
+          setView({ x: v.x, y: v.y, z: Math.max(0.1, Math.min(3, v.z)) })
+        }
       }
-    } catch {}
+    } catch (err) {
+      loadFailed.current = true
+      setSaveError(true)
+      console.error('NoteS could not load its saved workspace:', err)
+    }
     ready.current = true
   }, [])
   useEffect(() => {
-    if (!ready.current) return
+    if (!ready.current || loadFailed.current) return
     setSaved(false)
-    const t = setTimeout(() => {
+    setSaveError(false)
+    const payload = JSON.stringify({ app: 'NoteS', version: 25, topics: doc, view })
+    const flush = () => {
+      if (loadFailed.current) return
       try {
-        localStorage.setItem(KEY, JSON.stringify({ topics: doc, view }))
+        localStorage.setItem(KEY, payload)
         setSaved(true)
-      } catch {}
-    }, 400)
-    return () => clearTimeout(t)
+        setSaveError(false)
+      } catch (err) {
+        setSaved(false)
+        setSaveError(true)
+        console.error('NoteS local save failed:', err)
+      }
+    }
+    const t = setTimeout(flush, 400)
+    window.addEventListener('pagehide', flush)
+    return () => {
+      clearTimeout(t)
+      window.removeEventListener('pagehide', flush)
+    }
   }, [doc, view])
 
   /* ---------- View helpers ---------- */
@@ -921,8 +1014,8 @@ export default function Page() {
   }, [upd])
 
   const onSubSave = useCallback((tid, sid, html) => {
-    upd(tid, x => ({ ...x, subs: x.subs.map(q => q && q.id === sid ? { ...q, html } : q) }))
-  }, [upd])
+    setDoc(d => d.map(x => x.id === tid ? { ...x, subs: x.subs.map(q => q && q.id === sid ? { ...q, html: sanitizeHtml(html) } : q) } : x))
+  }, [])
   const onSubDelete = useCallback((tid, sid) => {
     upd(tid, x => ({ ...x, subs: x.subs.map(q => q && q.id === sid ? null : q) }))
   }, [upd])
@@ -938,11 +1031,11 @@ export default function Page() {
   }, [upd])
 
   const onNoteSave = useCallback((tid, sid, nid, html) => {
-    upd(tid, x => ({
+    setDoc(d => d.map(x => x.id === tid ? {
       ...x, subs: x.subs.map(q => q && q.id === sid
-        ? { ...q, notes: q.notes.map(n => n.id === nid ? { ...n, html } : n) } : q)
-    }))
-  }, [upd])
+        ? { ...q, notes: q.notes.map(n => n.id === nid ? { ...n, html: sanitizeHtml(html) } : n) } : q)
+    } : x))
+  }, [])
   const onNoteDelete = useCallback((tid, sid, nid) => {
     upd(tid, x => ({
       ...x, subs: x.subs.map(q => q && q.id === sid
@@ -973,7 +1066,12 @@ export default function Page() {
       } else if (d.type === 'topic') {
         const z = viewR.current.z
         const dx = (e.clientX - d.sx) / z, dy = (e.clientY - d.sy) / z
-        if (!d.moved && Math.hypot(dx, dy) > 3) d.moved = true
+        if (!d.moved && Math.hypot(dx, dy) > 3) {
+          d.moved = true
+          past.current.push(docR.current)
+          if (past.current.length > 100) past.current.shift()
+          future.current = []
+        }
         if (d.moved) setDoc(ds => ds.map(t => t.id === d.id ? { ...t, x: d.ox + dx, y: d.oy + dy } : t))
       }
     }
@@ -987,7 +1085,7 @@ export default function Page() {
 
     const tstart = e => {
       if (e.touches.length >= 2) {
-        if (drag.current?.type === 'topic') drag.current = null
+        drag.current = null
         const [a, b] = e.touches
         pinch.current = {
           dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
@@ -1019,10 +1117,11 @@ export default function Page() {
       pinch.current = { ...pinch.current, dist, cx, cy }
     }
 
-    const tend = e => { if (e.touches.length < 2) pinch.current = null }
+    const tend = e => { if (e.touches.length < 2) { pinch.current = null; drag.current = null } }
 
     const key = e => {
       const ed = e.target.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)
+      if (e.key === 'Escape' && showSearch) { setShowSearch(false); setSearch(''); e.preventDefault(); return }
       if (e.code === 'Space' && !ed) { space.current = true; e.preventDefault() }
       if (ed) {
         if (e.key === 'Escape') e.target.blur()
@@ -1107,10 +1206,10 @@ export default function Page() {
   }
 
   const startTopic = (e, t) => {
-    if (e.target.closest('button') || e.target.isContentEditable) return
+    if (e.target.closest('button') || e.target.isContentEditable) { e.stopPropagation(); return }
     if (pinch.current) return
     e.stopPropagation()
-    snap(); setSel(t.id)
+    setSel(t.id)
     drag.current = { type: 'topic', id: t.id, sx: e.clientX, sy: e.clientY, ox: t.x, oy: t.y, moved: false }
   }
 
@@ -1124,7 +1223,7 @@ export default function Page() {
   /* ---------- Export / Import ---------- */
   const exportJ = () => {
     const b = new Blob(
-      [JSON.stringify({ app: 'NoteS', version: 11, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
+      [JSON.stringify({ app: 'NoteS', version: 25, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
       { type: 'application/json' }
     )
     const a = document.createElement('a')
@@ -1139,23 +1238,15 @@ export default function Page() {
     r.onload = () => {
       try {
         const j = JSON.parse(r.result)
-        if (j.app !== 'NoteS' || !Array.isArray(j.topics) ||
-            !j.topics.every(t => t.id && typeof t.x === 'number' && Array.isArray(t.subs))) throw 0
+        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 25)) throw 0
         if (confirm('Replace the current workspace with this project?')) {
           snap()
-          const topics = j.topics.map((t, i) => {
-            const subs = Array.isArray(t.subs) ? [...t.subs] : []
-            while (subs.length < 3) subs.push(null)
-            return {
-              color: G,
-              role: i === 0 ? 'topic' : (t.role || 'comment'),
-              lineageId: t.lineageId || t.id,
-              ...t,
-              subs
-            }
-          })
+          const topics = normalizeProjectTopics(j.topics)
+          loadFailed.current = false
           setDoc(topics)
-          setView(j.view || { x: 0, y: 0, z: 1 })
+          setSel(null); setFocus(null)
+          const v = j.view
+          setView(v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z) ? { x: v.x, y: v.y, z: Math.max(0.1, Math.min(3, v.z)) } : { x: 0, y: 0, z: 1 })
         }
       } catch { alert('Invalid NoteS project file.') }
     }
@@ -1182,6 +1273,23 @@ export default function Page() {
     })
     return out.slice(0, 20)
   }, [search, doc])
+
+  const openSearchResult = r => {
+    setSearchHit(r.id)
+    focusTopic(r.topic)
+    setShowSearch(false)
+    setTimeout(() => {
+      const el = document.getElementById(`editable-${r.id}`)
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      setView(v => ({
+        ...v,
+        x: v.x + innerWidth / 2 - (rect.left + rect.width / 2),
+        y: v.y + innerHeight / 2 - (rect.top + rect.height / 2)
+      }))
+      el.focus()
+    }, 500)
+  }
 
   const askTarget = ask ? doc.find(t => t.id === ask) : null
 
@@ -1216,18 +1324,20 @@ export default function Page() {
                 key={t.id}
                 t={t}
                 isSel={sel === t.id}
+                searchHit={searchHit}
                 onStartDrag={startTopic}
                 onFocus={focusTopic}
                 onDup={dup}
                 onDelete={setAsk}
                 onChangeColor={changeColor}
-                onTitleSave={(id, h) => upd(id, x => ({ ...x, title: h }))}
+                onTitleSave={(id, h) => setDoc(d => d.map(x => x.id === id ? { ...x, title: sanitizeHtml(h) } : x))}
                 onSubSave={onSubSave}
                 onSubAdd={onSubAdd}
                 onSubDelete={onSubDelete}
                 onNoteAdd={onNoteAdd}
                 onNoteSave={onNoteSave}
                 onNoteDelete={onNoteDelete}
+                onEditStart={snap}
                 onAddRight={addRight}
                 onAddBelow={addBelow}
               />
@@ -1297,13 +1407,12 @@ export default function Page() {
           )}
         </div>
 
-        {/* TOOLBAR SUS - Fixat pentru hover/focus */}
         <motion.div
           data-ui
           initial={{ y: -12, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-white border border-[#DDE4DF] rounded-xl p-1 shadow-md w-[94vw] sm:w-auto overflow-x-auto overflow-y-hidden whitespace-nowrap"
-          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1 bg-white border border-[#DDE4DF] rounded-xl p-1 shadow-md w-[calc(100vw-24px)] sm:w-auto overflow-x-auto overflow-y-hidden whitespace-nowrap"
+          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', top: 'max(12px, env(safe-area-inset-top))' }}
         >
           <span className="px-2 font-semibold hidden sm:block shrink-0" style={{ color: G }}>NoteS</span>
           <Btn title="Select (V)" active={tool === 'v'} onClick={() => setTool('v')}><MousePointer2 size={16} /></Btn>
@@ -1336,7 +1445,7 @@ export default function Page() {
                   {searchResults.map(r => (
                     <button
                       key={r.id}
-                      onClick={() => { focusTopic(r.topic); setShowSearch(false) }}
+                      onClick={() => openSearchResult(r)}
                       className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-[#F7FAF8] flex items-center gap-2"
                     >
                       <span className="text-[10px] uppercase text-[#8B928E] w-14 shrink-0">{r.type}</span>
@@ -1350,7 +1459,7 @@ export default function Page() {
           document.body
         )}
 
-        <div data-ui className="absolute bottom-3 right-3 flex items-center gap-1 bg-white border border-[#DDE4DF] rounded-xl p-1 shadow-md">
+        <div data-ui className="absolute right-3 flex items-center gap-1 bg-white border border-[#DDE4DF] rounded-xl p-1 shadow-md" style={{ bottom: "max(12px, env(safe-area-inset-bottom))" }}>
           <Btn title="Zoom out" onClick={() => zoomC(1 / 1.2)}><Minus size={16} /></Btn>
           <span className="w-12 text-center text-xs text-[#8B928E]">{Math.round(view.z * 100)}%</span>
           <Btn title="Zoom in" onClick={() => zoomC(1.2)}><Plus size={16} /></Btn>
@@ -1366,7 +1475,7 @@ export default function Page() {
         )}
 
         <div data-ui className="absolute bottom-4 left-4 text-xs text-[#8B928E] hidden sm:block">
-          {saved ? '✓ Saved locally · export JSON to back up' : 'Saving…'}
+          {saveError ? 'Save failed · export a backup' : saved ? '✓ Saved locally · export JSON to back up' : 'Saving…'}
         </div>
 
         <DeleteModal
