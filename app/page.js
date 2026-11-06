@@ -12,14 +12,14 @@ import {
    CONSTANTS
    ============================================================ */
 const G = '#42A879'
-const KEY = 'notes-workspace-v26'
+const KEY = 'notes-workspace-v31'
 const COLORS = ['#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444', '#202522']
 const TXT_COLORS = ['#202522', '#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444']
 const HIGHLIGHTS = ['#FEF3C7', '#DBEAFE', '#DCFCE7', '#FCE7F3', '#EDE9FE', 'transparent']
 const uid = () => Math.random().toString(36).slice(2, 9)
 
 /* ============================================================
-   HELPERS & SANITIZER (Cu Protectii Anti-Crash)
+   HELPERS & SANITIZER
    ============================================================ */
 function hasText(html) {
   if (!html) return false
@@ -172,13 +172,16 @@ function GlobalStyles() {
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-thumb { background: #DDE4DF; border-radius: 3px; }
         ::-webkit-scrollbar-track { background: transparent; }
+        /* Ascunde scrollbar-ul pe toolbar-ul mobil dar pastreaza functionalitatea */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
     </>
   )
 }
 
 /* ============================================================
-   EDITABLE — Salvare DOAR la Blur (Cursor Fix)
+   EDITABLE
    ============================================================ */
 const Editable = memo(function Editable({ html, onSave, onEditStart, targetId, highlighted = false, className = '', placeholder = '' }) {
   const ref = useRef(null)
@@ -640,7 +643,6 @@ const NodeRow = memo(function NodeRow({
                       className="text-[#8B928E] hover:text-red-500 opacity-100 sm:opacity-0 sm:group-hover/sub:opacity-100 shrink-0 min-w-8 min-h-8 grid place-items-center"
                     ><X size={12} /></button>
                   </div>
-                  {/* AICI AM REPARAT SPATIUL LA NOTE */}
                   <div className="mt-2 flex flex-col gap-1.5">
                     {s.notes.map(n => (
                       <div key={n.id}
@@ -877,7 +879,7 @@ export default function Page() {
     if (!ready.current || loadFailed.current) return
     setSaved(false)
     setSaveError(false)
-    const payload = JSON.stringify({ app: 'NoteS', version: 26, topics: doc, view })
+    const payload = JSON.stringify({ app: 'NoteS', version: 31, topics: doc, view })
     const flush = () => {
       if (loadFailed.current) return
       try {
@@ -1228,7 +1230,7 @@ export default function Page() {
   /* ---------- Export / Import ---------- */
   const exportJ = () => {
     const b = new Blob(
-      [JSON.stringify({ app: 'NoteS', version: 26, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
+      [JSON.stringify({ app: 'NoteS', version: 31, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
       { type: 'application/json' }
     )
     const a = document.createElement('a')
@@ -1243,7 +1245,7 @@ export default function Page() {
     r.onload = () => {
       try {
         const j = JSON.parse(r.result)
-        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 26)) throw 0
+        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 31)) throw 0
         if (confirm('Replace the current workspace with this project?')) {
           snap()
           const topics = normalizeProjectTopics(j.topics)
@@ -1353,10 +1355,10 @@ export default function Page() {
             <div
               data-ui
               style={{ position: 'absolute', left: 0, top: 0, width: '100vw', height: '100vh' }}
-              className="grid place-items-center pointer-events-none"
+              className="grid place-items-center pointer-events-none px-4"
             >
-              <div className="pointer-events-auto text-center">
-                <div className="text-3xl font-semibold text-[#202522] mb-2">Welcome to NoteS</div>
+              <div className="pointer-events-auto text-center w-full max-w-sm">
+                <div className="text-2xl sm:text-3xl font-semibold text-[#202522] mb-2">Welcome to NoteS</div>
                 <div className="text-sm text-[#8B928E] mb-6">Press T then click · or start with a topic</div>
                 <button
                   onClick={() => {
@@ -1365,7 +1367,7 @@ export default function Page() {
                     const cy = (innerHeight / 2 - v.y) / v.z
                     addRootTopic(cx - 200, cy - 100)
                   }}
-                  className="mx-auto flex items-center gap-2 px-5 h-11 rounded-xl text-white font-medium shadow-md hover:shadow-lg transition-shadow"
+                  className="mx-auto flex items-center justify-center gap-2 px-5 h-11 w-full rounded-xl text-white font-medium shadow-md hover:shadow-lg transition-shadow"
                   style={{ background: G }}
                 >
                   <Plus size={18} /> New topic
@@ -1416,20 +1418,22 @@ export default function Page() {
           data-ui
           initial={{ y: -12, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className="absolute left-1/2 -translate-x-1/2 flex items-center gap-0.5 sm:gap-1 bg-white border border-[#DDE4DF] rounded-xl p-1 shadow-md w-[calc(100vw-32px)] sm:w-auto overflow-x-auto overflow-y-hidden whitespace-nowrap"
-          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', top: 'max(12px, env(safe-area-inset-top))' }}
+          className="absolute right-3 flex items-center gap-1 bg-white border border-[#DDE4DF] rounded-xl p-1 shadow-md max-w-[calc(100vw-24px)]"
+          style={{ top: 'max(12px, env(safe-area-inset-top))' }}
         >
-          <span className="px-1 sm:px-2 font-semibold hidden md:block shrink-0" style={{ color: G }}>NoteS</span>
-          <Btn title="Select (V)" active={tool === 'v'} onClick={() => setTool('v')}><MousePointer2 size={16} /></Btn>
-          <Btn title="Text (T)" active={tool === 't'} onClick={() => { setTool('t'); setSel(null) }}><Type size={16} /></Btn>
-          <div className="w-px h-5 bg-[#DDE4DF] mx-0.5 shrink-0" />
-          <Btn title="Undo (⌘Z)" onClick={undo} disabled={!past.current.length}><Undo2 size={16} /></Btn>
-          <Btn title="Redo (⌘⇧Z)" onClick={redo} disabled={!future.current.length}><Redo2 size={16} /></Btn>
-          <div className="w-px h-5 bg-[#DDE4DF] mx-0.5 shrink-0" />
-          <Btn title="Search (⌘F)" active={showSearch} onClick={() => setShowSearch(s => !s)}><Search size={16} /></Btn>
-          <Btn title="Export JSON" onClick={exportJ}><Download size={16} /></Btn>
-          <Btn title="Import JSON" onClick={() => fileRef.current.click()}><Upload size={16} /></Btn>
-          <input ref={fileRef} type="file" accept="application/json" hidden onChange={importJ} />
+          <span className="px-2 font-semibold hidden lg:block shrink-0" style={{ color: G }}>NoteS</span>
+          <div className="flex items-center gap-1 flex-wrap sm:flex-nowrap">
+            <Btn title="Select (V)" active={tool === 'v'} onClick={() => setTool('v')}><MousePointer2 size={16} /></Btn>
+            <Btn title="Text (T)" active={tool === 't'} onClick={() => { setTool('t'); setSel(null) }}><Type size={16} /></Btn>
+            <div className="w-px h-5 bg-[#DDE4DF] mx-0.5 shrink-0" />
+            <Btn title="Undo (⌘Z)" onClick={undo} disabled={!past.current.length}><Undo2 size={16} /></Btn>
+            <Btn title="Redo (⌘⇧Z)" onClick={redo} disabled={!future.current.length}><Redo2 size={16} /></Btn>
+            <div className="w-px h-5 bg-[#DDE4DF] mx-0.5 shrink-0" />
+            <Btn title="Search (⌘F)" active={showSearch} onClick={() => setShowSearch(s => !s)}><Search size={16} /></Btn>
+            <Btn title="Export JSON" onClick={exportJ}><Download size={16} /></Btn>
+            <Btn title="Import JSON" onClick={() => fileRef.current.click()}><Upload size={16} /></Btn>
+            <input ref={fileRef} type="file" accept="application/json" hidden onChange={importJ} />
+          </div>
         </motion.div>
 
         {showSearch && typeof document !== 'undefined' && createPortal(
@@ -1464,7 +1468,7 @@ export default function Page() {
           document.body
         )}
 
-        <div data-ui className="absolute right-3 flex items-center gap-1 bg-white border border-[#DDE4DF] rounded-xl p-1 shadow-md" style={{ bottom: "max(12px, env(safe-area-inset-bottom))" }}>
+        <div data-ui className="absolute right-3 flex items-center gap-1 bg-white border border-[#DDE4DF] rounded-xl p-1 shadow-md max-w-[calc(100vw-24px)]" style={{ bottom: "max(12px, env(safe-area-inset-bottom))" }}>
           <Btn title="Zoom out" onClick={() => zoomC(1 / 1.2)}><Minus size={16} /></Btn>
           <span className="w-12 text-center text-xs text-[#8B928E]">{Math.round(view.z * 100)}%</span>
           <Btn title="Zoom in" onClick={() => zoomC(1.2)}><Plus size={16} /></Btn>
