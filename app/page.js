@@ -12,21 +12,23 @@ import {
    CONSTANTS
    ============================================================ */
 const G = '#42A879'
-const KEY = 'notes-workspace-v25'
+const KEY = 'notes-workspace-v26'
 const COLORS = ['#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444', '#202522']
 const TXT_COLORS = ['#202522', '#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444']
 const HIGHLIGHTS = ['#FEF3C7', '#DBEAFE', '#DCFCE7', '#FCE7F3', '#EDE9FE', 'transparent']
 const uid = () => Math.random().toString(36).slice(2, 9)
 
 /* ============================================================
-   HELPERS & SANITIZER
+   HELPERS & SANITIZER (Cu Protectii Anti-Crash)
    ============================================================ */
 function hasText(html) {
   if (!html) return false
   if (typeof document === 'undefined') return html.length > 0
-  const tmp = document.createElement('div')
-  tmp.innerHTML = html
-  return (tmp.textContent || '').trim().length > 0
+  try {
+    const tmp = document.createElement('div')
+    tmp.innerHTML = html
+    return (tmp.textContent || '').trim().length > 0
+  } catch { return false }
 }
 
 function sanitizeHtml(html) {
@@ -638,32 +640,35 @@ const NodeRow = memo(function NodeRow({
                       className="text-[#8B928E] hover:text-red-500 opacity-100 sm:opacity-0 sm:group-hover/sub:opacity-100 shrink-0 min-w-8 min-h-8 grid place-items-center"
                     ><X size={12} /></button>
                   </div>
-                  {s.notes.map(n => (
-                    <div key={n.id}
-                      className="mt-2 rounded-md border px-2 py-1 text-xs flex gap-1 items-start group/note"
-                      style={{ background: `${accent}0d`, borderColor: `${accent}33` }}
-                    >
-                      <StickyNote size={11} className="mt-0.5 shrink-0" style={{ color: accent }} />
-                      <Editable
-                        html={n.html}
-                        targetId={n.id}
-                        highlighted={searchHit === n.id}
-                        onEditStart={onEditStart}
-                        onSave={h => onNoteSave(t.id, s.id, n.id, h)}
-                        className="flex-1 min-h-[16px] cursor-text"
-                        placeholder="Note"
-                      />
-                      <button
-                        onClick={() => onNoteDelete(t.id, s.id, n.id)}
-                        className="text-[#8B928E] hover:text-red-500 opacity-100 sm:opacity-0 sm:group-hover/note:opacity-100 shrink-0 min-w-8 min-h-8 grid place-items-center"
-                      ><X size={12} /></button>
-                    </div>
-                  ))}
+                  {/* AICI AM REPARAT SPATIUL LA NOTE */}
+                  <div className="mt-2 flex flex-col gap-1.5">
+                    {s.notes.map(n => (
+                      <div key={n.id}
+                        className="rounded-md border px-2 py-1 text-xs flex gap-1 items-start group/note"
+                        style={{ background: `${accent}0d`, borderColor: `${accent}33` }}
+                      >
+                        <StickyNote size={11} className="mt-0.5 shrink-0" style={{ color: accent }} />
+                        <Editable
+                          html={n.html}
+                          targetId={n.id}
+                          highlighted={searchHit === n.id}
+                          onEditStart={onEditStart}
+                          onSave={h => onNoteSave(t.id, s.id, n.id, h)}
+                          className="flex-1 min-h-[16px] cursor-text"
+                          placeholder="Note"
+                        />
+                        <button
+                          onClick={() => onNoteDelete(t.id, s.id, n.id)}
+                          className="text-[#8B928E] hover:text-red-500 opacity-100 sm:opacity-0 sm:group-hover/note:opacity-100 shrink-0 min-w-8 min-h-8 grid place-items-center"
+                        ><X size={12} /></button>
+                      </div>
+                    ))}
+                  </div>
                   <button
                     onClick={() => onNoteAdd(t.id, s.id)}
                     disabled={!subReady}
                     title={subReady ? 'Add another note' : 'Write the subtopic first'}
-                    className={`mt-auto pt-2 flex items-center gap-1 text-xs ${subReady ? 'hover:opacity-100' : 'opacity-30 cursor-not-allowed'}`}
+                    className={`mt-2 flex items-center gap-1 text-xs ${subReady ? 'hover:opacity-100' : 'opacity-30 cursor-not-allowed'}`}
                     style={{ color: accent }}
                   >
                     <Plus size={12} /> note
@@ -872,7 +877,7 @@ export default function Page() {
     if (!ready.current || loadFailed.current) return
     setSaved(false)
     setSaveError(false)
-    const payload = JSON.stringify({ app: 'NoteS', version: 25, topics: doc, view })
+    const payload = JSON.stringify({ app: 'NoteS', version: 26, topics: doc, view })
     const flush = () => {
       if (loadFailed.current) return
       try {
@@ -1223,7 +1228,7 @@ export default function Page() {
   /* ---------- Export / Import ---------- */
   const exportJ = () => {
     const b = new Blob(
-      [JSON.stringify({ app: 'NoteS', version: 25, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
+      [JSON.stringify({ app: 'NoteS', version: 26, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
       { type: 'application/json' }
     )
     const a = document.createElement('a')
@@ -1238,7 +1243,7 @@ export default function Page() {
     r.onload = () => {
       try {
         const j = JSON.parse(r.result)
-        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 25)) throw 0
+        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 26)) throw 0
         if (confirm('Replace the current workspace with this project?')) {
           snap()
           const topics = normalizeProjectTopics(j.topics)
@@ -1411,10 +1416,10 @@ export default function Page() {
           data-ui
           initial={{ y: -12, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1 bg-white border border-[#DDE4DF] rounded-xl p-1 shadow-md w-[calc(100vw-24px)] sm:w-auto overflow-x-auto overflow-y-hidden whitespace-nowrap"
+          className="absolute left-1/2 -translate-x-1/2 flex items-center gap-0.5 sm:gap-1 bg-white border border-[#DDE4DF] rounded-xl p-1 shadow-md w-[calc(100vw-32px)] sm:w-auto overflow-x-auto overflow-y-hidden whitespace-nowrap"
           style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', top: 'max(12px, env(safe-area-inset-top))' }}
         >
-          <span className="px-2 font-semibold hidden sm:block shrink-0" style={{ color: G }}>NoteS</span>
+          <span className="px-1 sm:px-2 font-semibold hidden md:block shrink-0" style={{ color: G }}>NoteS</span>
           <Btn title="Select (V)" active={tool === 'v'} onClick={() => setTool('v')}><MousePointer2 size={16} /></Btn>
           <Btn title="Text (T)" active={tool === 't'} onClick={() => { setTool('t'); setSel(null) }}><Type size={16} /></Btn>
           <div className="w-px h-5 bg-[#DDE4DF] mx-0.5 shrink-0" />
