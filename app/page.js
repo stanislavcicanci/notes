@@ -12,7 +12,7 @@ import {
    CONSTANTS
    ============================================================ */
 const G = '#42A879'
-const KEY = 'notes-workspace-v8'
+const KEY = 'notes-workspace-v9'
 const COLORS = ['#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444', '#202522']
 const TXT_COLORS = ['#202522', '#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444']
 const HIGHLIGHTS = ['#FEF3C7', '#DBEAFE', '#DCFCE7', '#FCE7F3', '#EDE9FE', 'transparent']
@@ -23,7 +23,6 @@ const uid = () => Math.random().toString(36).slice(2, 9)
    ============================================================ */
 function hasText(html) {
   if (!html) return false
-  // Use a temporary element to strip HTML tags safely
   if (typeof document === 'undefined') return html.length > 0
   const tmp = document.createElement('div')
   tmp.innerHTML = html
@@ -92,12 +91,11 @@ const cloneNode = (t, dx = 40) => {
 }
 
 /* ============================================================
-   GLOBAL STYLES & VIEWPORT FIX
+   GLOBAL STYLES
    ============================================================ */
 function GlobalStyles() {
   return (
     <>
-      {/* Viewport Meta for Mobile (Prevents weird zooming and text selection issues) */}
       <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -139,7 +137,6 @@ const Editable = memo(function Editable({ html, onSave, className = '', placehol
   const timer = useRef(null)
   const isFocused = useRef(false)
 
-  // Sync external changes ONLY when not actively editing
   useEffect(() => {
     if (!isFocused.current && ref.current && ref.current.innerHTML !== html) {
       ref.current.innerHTML = html
@@ -192,7 +189,6 @@ const Editable = memo(function Editable({ html, onSave, className = '', placehol
       }}
       onInput={() => {
         if (timer.current) clearTimeout(timer.current)
-        // 350ms delay protects against iOS keyboard backwards-typing glitch
         timer.current = setTimeout(commit, 350)
       }}
       dangerouslySetInnerHTML={{ __html: html || '' }}
@@ -225,7 +221,7 @@ const FmtBtn = ({ onClick, children, active, title }) => (
 )
 
 /* ============================================================
-   SELECTION TOOLBAR
+   SELECTION TOOLBAR — High Contrast
    ============================================================ */
 function SelectionToolbar() {
   const [state, setState] = useState(null)
@@ -292,7 +288,8 @@ function SelectionToolbar() {
       onMouseDown={e => e.preventDefault()}
       onPointerDown={e => e.stopPropagation()}
       style={{ position: 'fixed', left, top, zIndex: 10000 }}
-      className="flex items-center gap-0.5 bg-white border border-[#DDE4DF] rounded-xl shadow-xl p-1 max-w-[96vw] overflow-x-auto"
+      // Am adăugat bg-white și shadow-2xl pentru contrast perfect
+      className="flex items-center gap-0.5 bg-white border border-[#DDE4DF] rounded-xl shadow-2xl p-1 max-w-[96vw] overflow-x-auto text-[#202522]"
     >
       <FmtBtn active={marks.bold} title="Bold" onClick={() => run('bold')}><Bold size={14} /></FmtBtn>
       <FmtBtn active={marks.italic} title="Italic" onClick={() => run('italic')}><Italic size={14} /></FmtBtn>
@@ -304,7 +301,7 @@ function SelectionToolbar() {
       <select
         onChange={e => { if (e.target.value) run('formatBlock', e.target.value); e.target.value = '' }}
         defaultValue="" onMouseDown={e => e.stopPropagation()}
-        className="h-7 text-xs rounded border border-[#DDE4DF] px-1 outline-none bg-white hover:bg-[#F7FAF8] cursor-pointer shrink-0"
+        className="h-7 text-xs rounded border border-[#DDE4DF] px-1 outline-none bg-white hover:bg-[#F7FAF8] cursor-pointer shrink-0 font-medium"
       >
         <option value="" disabled>¶</option>
         <option value="p">Body</option>
@@ -315,7 +312,7 @@ function SelectionToolbar() {
       <div className="relative group shrink-0">
         <button onMouseDown={e => e.preventDefault()} title="Text color"
           className="h-7 w-7 grid place-items-center rounded hover:bg-[#F7FAF8] relative">
-          <span className="text-sm font-semibold">A</span>
+          <span className="text-sm font-bold">A</span>
           <span className="absolute bottom-0.5 left-1 right-1 h-0.5 rounded" style={{ background: G }} />
         </button>
         <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 hidden group-hover:flex flex-wrap gap-1 p-2 bg-white border border-[#DDE4DF] rounded-lg shadow-lg w-32 z-10">
@@ -330,7 +327,7 @@ function SelectionToolbar() {
       <div className="relative group shrink-0">
         <button onMouseDown={e => e.preventDefault()} title="Highlight"
           className="h-7 w-7 grid place-items-center rounded hover:bg-[#F7FAF8]">
-          <span className="text-xs font-semibold bg-yellow-200 px-1 rounded">H</span>
+          <span className="text-xs font-bold bg-yellow-200 px-1 rounded text-black">H</span>
         </button>
         <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 hidden group-hover:flex flex-wrap gap-1 p-2 bg-white border border-[#DDE4DF] rounded-lg shadow-lg w-32 z-10">
           {HIGHLIGHTS.map(c => (
@@ -344,7 +341,7 @@ function SelectionToolbar() {
       <select
         onChange={e => { if (e.target.value) run('fontSize', e.target.value); e.target.value = '' }}
         defaultValue="" onMouseDown={e => e.stopPropagation()}
-        className="h-7 text-xs rounded border border-[#DDE4DF] px-1 outline-none bg-white hover:bg-[#F7FAF8] cursor-pointer shrink-0"
+        className="h-7 text-xs rounded border border-[#DDE4DF] px-1 outline-none bg-white hover:bg-[#F7FAF8] cursor-pointer shrink-0 font-medium"
       >
         <option value="" disabled>Size</option>
         <option value="2">S</option>
@@ -743,7 +740,19 @@ export default function Page() {
     setAsk(null)
   }
 
-  /* ---------- Add node — gated by parent title ---------- */
+  /* ---------- Culori pentru topicuri noi ---------- */
+  // Găsește o culoare care nu este folosită deja de topicurile principale
+  const getNewTopicColor = useCallback(() => {
+    const usedColors = new Set(docR.current.filter(t => t.role === 'topic').map(t => t.color))
+    // Caută prima culoare liberă
+    for (const c of COLORS) {
+      if (!usedColors.has(c)) return c
+    }
+    // Dacă toate sunt folosite, alege una aleatorie
+    return COLORS[Math.floor(Math.random() * COLORS.length)]
+  }, [])
+
+  /* ---------- Add node ---------- */
   const addRight = useCallback((afterId) => {
     const t = docR.current.find(t => t.id === afterId)
     if (!t) return
@@ -773,9 +782,10 @@ export default function Page() {
   }, [commit])
 
   const addRootTopic = useCallback((x, y, title = '') => {
-    const nt = mkNode(x, y, { title, color: G, role: 'topic' })
+    const newColor = getNewTopicColor()
+    const nt = mkNode(x, y, { title, color: newColor, role: 'topic' })
     commit(d => [...d, nt])
-  }, [commit])
+  }, [commit, getNewTopicColor])
 
   const changeColor = useCallback((id, color) => {
     upd(id, x => {
@@ -959,7 +969,6 @@ export default function Page() {
   const down = e => {
     if (e.target.closest('[data-ui]')) return
 
-    // Flush any focused editable BEFORE mutating state
     if (!e.target.closest('[data-editable]')) {
       const active = document.activeElement
       if (active && active.isContentEditable) {
@@ -1001,7 +1010,7 @@ export default function Page() {
   /* ---------- Export / Import ---------- */
   const exportJ = () => {
     const b = new Blob(
-      [JSON.stringify({ app: 'NoteS', version: 8, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
+      [JSON.stringify({ app: 'NoteS', version: 9, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
       { type: 'application/json' }
     )
     const a = document.createElement('a')
@@ -1174,13 +1183,15 @@ export default function Page() {
           )}
         </div>
 
+        {/* TOOLBAR SUS - Am adaugat scroll orizontal pentru mobil */}
         <motion.div
           data-ui
           initial={{ y: -12, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-white border border-[#DDE4DF] rounded-xl p-1 shadow-md max-w-[96vw] overflow-x-auto"
+          className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-white border border-[#DDE4DF] rounded-xl p-1 shadow-md w-[94vw] sm:w-auto overflow-x-auto overflow-y-hidden whitespace-nowrap"
+          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
-          <span className="px-2 font-semibold hidden sm:block" style={{ color: G }}>NoteS</span>
+          <span className="px-2 font-semibold hidden sm:block shrink-0" style={{ color: G }}>NoteS</span>
           <Btn title="Select (V)" active={tool === 'v'} onClick={() => setTool('v')}><MousePointer2 size={16} /></Btn>
           <Btn title="Text (T)" active={tool === 't'} onClick={() => { setTool('t'); setSel(null) }}><Type size={16} /></Btn>
           <div className="w-px h-5 bg-[#DDE4DF] mx-0.5 shrink-0" />
@@ -1235,12 +1246,12 @@ export default function Page() {
 
         {focus && (
           <button data-ui onClick={() => setFocus(null)}
-            className="absolute top-3 right-3 flex items-center gap-1 px-3 h-9 bg-white border border-[#DDE4DF] rounded-xl shadow-md text-sm hover:bg-[#F7FAF8]">
+            className="absolute top-20 sm:top-3 right-3 flex items-center gap-1 px-3 h-9 bg-white border border-[#DDE4DF] rounded-xl shadow-md text-sm hover:bg-[#F7FAF8]">
             <X size={14} /> Exit focus
           </button>
         )}
 
-        <div data-ui className="absolute bottom-4 left-4 text-xs text-[#8B928E]">
+        <div data-ui className="absolute bottom-4 left-4 text-xs text-[#8B928E] hidden sm:block">
           {saved ? '✓ Saved locally · export JSON to back up' : 'Saving…'}
         </div>
 
