@@ -5,14 +5,14 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Type, MousePointer2, Undo2, Redo2, Download, Upload, Plus, Trash2, Copy, Check,
   Bold, Italic, Underline, Minus, Maximize, Home, X, GripHorizontal, Search,
-  Palette, Focus, StickyNote, ArrowRight, ArrowDown, AlertTriangle
+  Palette, Focus, StickyNote, ArrowRight, ArrowDown, AlertTriangle, Highlighter, ChevronDown
 } from 'lucide-react'
 
 /* ============================================================
    CONSTANTS
    ============================================================ */
 const G = '#42A879'
-const KEY = 'notes-workspace-v9'
+const KEY = 'notes-workspace-v11'
 const COLORS = ['#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444', '#202522']
 const TXT_COLORS = ['#202522', '#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444']
 const HIGHLIGHTS = ['#FEF3C7', '#DBEAFE', '#DCFCE7', '#FCE7F3', '#EDE9FE', 'transparent']
@@ -105,7 +105,7 @@ function GlobalStyles() {
           font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
           -webkit-font-smoothing: antialiased;
         }
-        * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+        * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; outline: none !important; }
         [contenteditable]:empty:before {
           content: attr(data-placeholder);
           color: #B0B7B2;
@@ -129,7 +129,7 @@ function GlobalStyles() {
 }
 
 /* ============================================================
-   EDITABLE — Mobile-First (Saves safely, no cursor jumps)
+   EDITABLE — Mobile-First
    ============================================================ */
 const Editable = memo(function Editable({ html, onSave, className = '', placeholder = '' }) {
   const ref = useRef(null)
@@ -197,15 +197,15 @@ const Editable = memo(function Editable({ html, onSave, className = '', placehol
 })
 
 /* ============================================================
-   BUTTONS
+   BUTTONS (Fix pentru focus și hover)
    ============================================================ */
 const Btn = ({ onClick, children, active, title, disabled }) => (
   <motion.button
-    whileTap={{ scale: 0.9 }} whileHover={{ scale: 1.05 }}
+    whileTap={{ scale: 0.9 }}
     title={title} disabled={disabled} onClick={onClick}
-    className={`h-9 w-9 grid place-items-center rounded-lg transition-colors shrink-0 ${
+    className={`h-9 w-9 grid place-items-center rounded-lg transition-all shrink-0 select-none outline-none focus:outline-none focus:ring-0 ${
       disabled ? 'opacity-30 cursor-not-allowed' : 'hover:bg-[#F7FAF8]'
-    } ${active ? 'text-white bg-[#42A879] hover:bg-[#42A879]' : 'text-[#202522]'}`}
+    } ${active ? 'text-white bg-[#42A879] shadow-sm hover:bg-[#42A879]' : 'text-[#202522]'}`}
   >{children}</motion.button>
 )
 
@@ -214,14 +214,125 @@ const FmtBtn = ({ onClick, children, active, title }) => (
     whileTap={{ scale: 0.9 }}
     onMouseDown={e => e.preventDefault()}
     onClick={onClick} title={title}
-    className={`h-7 w-7 grid place-items-center rounded transition-colors shrink-0 ${
-      active ? 'bg-[#42A879] text-white hover:bg-[#42A879]' : 'hover:bg-[#F7FAF8] text-[#202522]'
+    className={`h-8 w-8 grid place-items-center rounded-md transition-colors shrink-0 outline-none focus:outline-none focus:ring-0 ${
+      active ? 'bg-[#42A879] text-white shadow-sm' : 'hover:bg-[#F0F4F1] text-[#202522]'
     }`}
   >{children}</motion.button>
 )
 
 /* ============================================================
-   SELECTION TOOLBAR — High Contrast
+   PREMIUM SELECT COMPONENT
+   ============================================================ */
+function PremiumSelect({ value, onChange, options, icon, label, width = "min-w-[80px]" }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  const selectedLabel = options.find(o => o.value === value)?.label || label
+
+  return (
+    <div className="relative shrink-0" ref={ref}>
+      <button
+        onMouseDown={e => e.preventDefault()}
+        onClick={() => setOpen(!open)}
+        className={`h-8 ${width} px-2 flex items-center justify-between gap-1 rounded-md hover:bg-[#F0F4F1] text-[#202522] transition-colors text-sm font-medium outline-none focus:outline-none focus:ring-0`}
+      >
+        <div className="flex items-center gap-1.5 truncate">
+          {icon}
+          <span className="truncate">{selectedLabel}</span>
+        </div>
+        <ChevronDown size={12} className={`text-[#8B928E] transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: 4, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.96 }}
+            transition={{ duration: 0.15 }}
+            className="absolute top-full left-0 mt-1 w-full min-w-[120px] bg-white border border-[#DDE4DF] rounded-lg shadow-xl overflow-hidden z-[10001] py-1"
+          >
+            {options.map(opt => (
+              <button
+                key={opt.value}
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => { onChange(opt.value); setOpen(false) }}
+                className={`w-full text-left px-3 py-1.5 text-sm transition-colors ${
+                  value === opt.value ? 'bg-[#42A879]/10 text-[#42A879] font-medium' : 'text-[#202522] hover:bg-[#F7FAF8]'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+/* ============================================================
+   PREMIUM COLOR PICKER
+   ============================================================ */
+function ColorPicker({ colors, onChange, icon, title, isHighlight }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  return (
+    <div className="relative shrink-0" ref={ref}>
+      <button
+        onMouseDown={e => e.preventDefault()}
+        onClick={() => setOpen(!open)}
+        className={`h-8 w-8 grid place-items-center rounded-md hover:bg-[#F0F4F1] transition-colors relative outline-none focus:outline-none focus:ring-0 ${open ? 'bg-[#F0F4F1]' : ''}`}
+        title={title}
+      >
+        {icon}
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: 4, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.96 }}
+            transition={{ duration: 0.15 }}
+            className="absolute top-full left-1/2 -translate-x-1/2 mt-1 p-2 bg-white border border-[#DDE4DF] rounded-xl shadow-xl grid grid-cols-4 gap-1.5 z-[10001]"
+          >
+            {colors.map(c => (
+              <button
+                key={c}
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => { onChange(c); setOpen(false) }}
+                className="h-6 w-6 rounded-full border border-black/5 shadow-sm hover:scale-110 transition-transform outline-none focus:outline-none focus:ring-0"
+                style={{
+                  background: c === 'transparent' ? 'repeating-linear-gradient(45deg,#fff,#fff 3px,#eee 3px,#eee 6px)' : c
+                }}
+                title={c === 'transparent' ? 'Clear' : c}
+              />
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+/* ============================================================
+   SELECTION TOOLBAR
    ============================================================ */
 function SelectionToolbar() {
   const [state, setState] = useState(null)
@@ -276,82 +387,88 @@ function SelectionToolbar() {
 
   if (!state || typeof document === 'undefined') return null
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
-  const left = Math.max(8, Math.min(vw - 420, state.x - 200))
+  const left = Math.max(8, Math.min(vw - 460, state.x - 230))
   const top = Math.max(8, state.y - 60)
+
+  const formatOptions = [
+    { label: 'Body Text', value: 'p' },
+    { label: 'Heading 1', value: 'h1' },
+    { label: 'Heading 2', value: 'h2' },
+    { label: 'Heading 3', value: 'h3' },
+  ]
+
+  const sizeOptions = [
+    { label: 'Small', value: '2' },
+    { label: 'Normal', value: '3' },
+    { label: 'Large', value: '4' },
+    { label: 'XL', value: '5' },
+    { label: 'XXL', value: '6' },
+  ]
 
   return createPortal(
     <motion.div
       data-ui
       initial={{ opacity: 0, y: 4, scale: 0.96 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.12 }}
+      transition={{ duration: 0.15 }}
       onMouseDown={e => e.preventDefault()}
       onPointerDown={e => e.stopPropagation()}
       style={{ position: 'fixed', left, top, zIndex: 10000 }}
-      // Am adăugat bg-white și shadow-2xl pentru contrast perfect
-      className="flex items-center gap-0.5 bg-white border border-[#DDE4DF] rounded-xl shadow-2xl p-1 max-w-[96vw] overflow-x-auto text-[#202522]"
+      className="flex items-center gap-0.5 bg-white border border-[#DDE4DF] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.08)] p-1 max-w-[96vw] overflow-visible text-[#202522]"
     >
-      <FmtBtn active={marks.bold} title="Bold" onClick={() => run('bold')}><Bold size={14} /></FmtBtn>
-      <FmtBtn active={marks.italic} title="Italic" onClick={() => run('italic')}><Italic size={14} /></FmtBtn>
-      <FmtBtn active={marks.underline} title="Underline" onClick={() => run('underline')}><Underline size={14} /></FmtBtn>
+      <FmtBtn active={marks.bold} title="Bold" onClick={() => run('bold')}><Bold size={15} /></FmtBtn>
+      <FmtBtn active={marks.italic} title="Italic" onClick={() => run('italic')}><Italic size={15} /></FmtBtn>
+      <FmtBtn active={marks.underline} title="Underline" onClick={() => run('underline')}><Underline size={15} /></FmtBtn>
       <FmtBtn active={marks.strike} title="Strike" onClick={() => run('strikeThrough')}>
-        <span className="text-xs font-semibold line-through">S</span>
+        <span className="text-[13px] font-semibold line-through">S</span>
       </FmtBtn>
-      <div className="w-px h-5 bg-[#DDE4DF] mx-0.5 shrink-0" />
-      <select
-        onChange={e => { if (e.target.value) run('formatBlock', e.target.value); e.target.value = '' }}
-        defaultValue="" onMouseDown={e => e.stopPropagation()}
-        className="h-7 text-xs rounded border border-[#DDE4DF] px-1 outline-none bg-white hover:bg-[#F7FAF8] cursor-pointer shrink-0 font-medium"
-      >
-        <option value="" disabled>¶</option>
-        <option value="p">Body</option>
-        <option value="h1">H1</option>
-        <option value="h2">H2</option>
-        <option value="h3">H3</option>
-      </select>
-      <div className="relative group shrink-0">
-        <button onMouseDown={e => e.preventDefault()} title="Text color"
-          className="h-7 w-7 grid place-items-center rounded hover:bg-[#F7FAF8] relative">
-          <span className="text-sm font-bold">A</span>
-          <span className="absolute bottom-0.5 left-1 right-1 h-0.5 rounded" style={{ background: G }} />
-        </button>
-        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 hidden group-hover:flex flex-wrap gap-1 p-2 bg-white border border-[#DDE4DF] rounded-lg shadow-lg w-32 z-10">
-          {TXT_COLORS.map(c => (
-            <button key={c}
-              onMouseDown={e => { e.preventDefault(); run('foreColor', c) }}
-              className="h-5 w-5 rounded-full border border-white shadow-sm hover:scale-110 transition-transform"
-              style={{ background: c }} />
-          ))}
-        </div>
-      </div>
-      <div className="relative group shrink-0">
-        <button onMouseDown={e => e.preventDefault()} title="Highlight"
-          className="h-7 w-7 grid place-items-center rounded hover:bg-[#F7FAF8]">
-          <span className="text-xs font-bold bg-yellow-200 px-1 rounded text-black">H</span>
-        </button>
-        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 hidden group-hover:flex flex-wrap gap-1 p-2 bg-white border border-[#DDE4DF] rounded-lg shadow-lg w-32 z-10">
-          {HIGHLIGHTS.map(c => (
-            <button key={c}
-              onMouseDown={e => { e.preventDefault(); run('hiliteColor', c) }}
-              className="h-5 w-5 rounded border border-[#DDE4DF] hover:scale-110 transition-transform"
-              style={{ background: c === 'transparent' ? 'repeating-linear-gradient(45deg,#fff,#fff 3px,#eee 3px,#eee 6px)' : c }} />
-          ))}
-        </div>
-      </div>
-      <select
-        onChange={e => { if (e.target.value) run('fontSize', e.target.value); e.target.value = '' }}
-        defaultValue="" onMouseDown={e => e.stopPropagation()}
-        className="h-7 text-xs rounded border border-[#DDE4DF] px-1 outline-none bg-white hover:bg-[#F7FAF8] cursor-pointer shrink-0 font-medium"
-      >
-        <option value="" disabled>Size</option>
-        <option value="2">S</option>
-        <option value="3">M</option>
-        <option value="4">L</option>
-        <option value="5">XL</option>
-        <option value="6">XXL</option>
-      </select>
-      <div className="w-px h-5 bg-[#DDE4DF] mx-0.5 shrink-0" />
-      <FmtBtn title="Clear formatting" onClick={() => run('removeFormat')}><X size={14} /></FmtBtn>
+      
+      <div className="w-px h-5 bg-[#DDE4DF] mx-1 shrink-0" />
+      
+      <PremiumSelect
+        options={formatOptions}
+        label="Text"
+        icon={<Type size={14} className="text-[#8B928E]" />}
+        value=""
+        onChange={val => run('formatBlock', val)}
+        width="min-w-[100px]"
+      />
+
+      <ColorPicker
+        colors={TXT_COLORS}
+        onChange={c => run('foreColor', c)}
+        title="Text Color"
+        icon={
+          <div className="flex flex-col items-center">
+            <span className="text-[13px] font-bold leading-none">A</span>
+            <span className="w-3 h-1 rounded-sm mt-0.5" style={{ background: G }} />
+          </div>
+        }
+      />
+
+      <ColorPicker
+        colors={HIGHLIGHTS}
+        onChange={c => run('hiliteColor', c)}
+        title="Highlight"
+        isHighlight
+        icon={
+          <div className="relative">
+            <Highlighter size={15} className="text-[#202522]" />
+            <span className="absolute -bottom-1 -right-1 w-2 h-2 rounded-full bg-yellow-400 border border-white" />
+          </div>
+        }
+      />
+
+      <PremiumSelect
+        options={sizeOptions}
+        label="Size"
+        value=""
+        onChange={val => run('fontSize', val)}
+        width="min-w-[80px]"
+      />
+
+      <div className="w-px h-5 bg-[#DDE4DF] mx-1 shrink-0" />
+      <FmtBtn title="Clear formatting" onClick={() => run('removeFormat')}><X size={15} /></FmtBtn>
     </motion.div>,
     document.body
   )
@@ -524,7 +641,7 @@ const NodeRow = memo(function NodeRow({
           onClick={() => onAddRight(t.id)}
           disabled={!titleReady}
           title={titleReady ? 'Add new comment to the right' : 'Write a title first'}
-          className="h-8 px-2 rounded-md border-2 border-dashed flex items-center gap-1 text-xs transition-colors"
+          className="h-8 px-2 rounded-md border-2 border-dashed flex items-center gap-1 text-xs transition-colors outline-none focus:outline-none focus:ring-0"
           style={{
             borderColor: titleReady ? `${accent}66` : '#DDE4DF',
             color: titleReady ? accent : '#B0B7B2',
@@ -541,7 +658,7 @@ const NodeRow = memo(function NodeRow({
           onClick={() => onAddBelow(t.id)}
           disabled={!titleReady}
           title={titleReady ? 'Add new comment below' : 'Write a title first'}
-          className="h-8 px-2 rounded-md border-2 border-dashed flex items-center gap-1 text-xs transition-colors"
+          className="h-8 px-2 rounded-md border-2 border-dashed flex items-center gap-1 text-xs transition-colors outline-none focus:outline-none focus:ring-0"
           style={{
             borderColor: titleReady ? `${accent}66` : '#DDE4DF',
             color: titleReady ? accent : '#B0B7B2',
@@ -741,14 +858,11 @@ export default function Page() {
   }
 
   /* ---------- Culori pentru topicuri noi ---------- */
-  // Găsește o culoare care nu este folosită deja de topicurile principale
   const getNewTopicColor = useCallback(() => {
     const usedColors = new Set(docR.current.filter(t => t.role === 'topic').map(t => t.color))
-    // Caută prima culoare liberă
     for (const c of COLORS) {
       if (!usedColors.has(c)) return c
     }
-    // Dacă toate sunt folosite, alege una aleatorie
     return COLORS[Math.floor(Math.random() * COLORS.length)]
   }, [])
 
@@ -1010,7 +1124,7 @@ export default function Page() {
   /* ---------- Export / Import ---------- */
   const exportJ = () => {
     const b = new Blob(
-      [JSON.stringify({ app: 'NoteS', version: 9, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
+      [JSON.stringify({ app: 'NoteS', version: 11, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
       { type: 'application/json' }
     )
     const a = document.createElement('a')
@@ -1183,7 +1297,7 @@ export default function Page() {
           )}
         </div>
 
-        {/* TOOLBAR SUS - Am adaugat scroll orizontal pentru mobil */}
+        {/* TOOLBAR SUS - Fixat pentru hover/focus */}
         <motion.div
           data-ui
           initial={{ y: -12, opacity: 0 }}
@@ -1262,7 +1376,6 @@ export default function Page() {
           onCancel={() => setAsk(null)}
           onConfirm={yesDelete}
         />
-        
       </div>
     </>
   )
