@@ -12,46 +12,24 @@ import {
    CONSTANTS
    ============================================================ */
 const G = '#42A879'
-const KEY = 'notes-workspace-v7'
+const KEY = 'notes-workspace-v8'
 const COLORS = ['#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444', '#202522']
 const TXT_COLORS = ['#202522', '#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444']
 const HIGHLIGHTS = ['#FEF3C7', '#DBEAFE', '#DCFCE7', '#FCE7F3', '#EDE9FE', 'transparent']
 const uid = () => Math.random().toString(36).slice(2, 9)
 
 /* ============================================================
-   HELPERS
+   HELPERS & SANITIZER
    ============================================================ */
-// strip HTML and check if there is actual visible text
 function hasText(html) {
   if (!html) return false
+  // Use a temporary element to strip HTML tags safely
+  if (typeof document === 'undefined') return html.length > 0
   const tmp = document.createElement('div')
   tmp.innerHTML = html
   return (tmp.textContent || '').trim().length > 0
 }
 
-/* ============================================================
-   FACTORIES
-   ============================================================ */
-const mkSub = () => ({ id: uid(), html: '', notes: [] })
-const mkNode = (x, y, { title = '', color = G, role = 'topic', lineageId = null } = {}) => {
-  const id = uid()
-  return {
-    id, x, y, title, color, role,
-    lineageId: lineageId || id,
-    subs: [null, null, null]
-  }
-}
-const cloneNode = (t, dx = 40) => {
-  const newId = uid()
-  return {
-    ...t, id: newId, x: t.x + dx, lineageId: newId,
-    subs: t.subs.map(s => s ? { ...s, id: uid(), notes: s.notes.map(n => ({ ...n, id: uid() })) } : null)
-  }
-}
-
-/* ============================================================
-   HTML SANITIZER
-   ============================================================ */
 function sanitizeHtml(html) {
   if (typeof document === 'undefined') return html
   const tpl = document.createElement('template')
@@ -94,75 +72,100 @@ function sanitizeHtml(html) {
 }
 
 /* ============================================================
-   GLOBAL STYLES
+   FACTORIES
+   ============================================================ */
+const mkSub = () => ({ id: uid(), html: '', notes: [] })
+const mkNode = (x, y, { title = '', color = G, role = 'topic', lineageId = null } = {}) => {
+  const id = uid()
+  return {
+    id, x, y, title, color, role,
+    lineageId: lineageId || id,
+    subs: [null, null, null]
+  }
+}
+const cloneNode = (t, dx = 40) => {
+  const newId = uid()
+  return {
+    ...t, id: newId, x: t.x + dx, lineageId: newId,
+    subs: t.subs.map(s => s ? { ...s, id: uid(), notes: s.notes.map(n => ({ ...n, id: uid() })) } : null)
+  }
+}
+
+/* ============================================================
+   GLOBAL STYLES & VIEWPORT FIX
    ============================================================ */
 function GlobalStyles() {
   return (
-    <style jsx global>{`
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-      html, body {
-        height: 100%; margin: 0; padding: 0;
-        overscroll-behavior: none;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        -webkit-font-smoothing: antialiased;
-      }
-      * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
-      [contenteditable]:empty:before {
-        content: attr(data-placeholder);
-        color: #B0B7B2;
-        pointer-events: none;
-      }
-      [contenteditable] b, [contenteditable] strong { font-weight: 700; }
-      [contenteditable] i, [contenteditable] em { font-style: italic; }
-      [contenteditable] u { text-decoration: underline; }
-      [contenteditable] s, [contenteditable] strike { text-decoration: line-through; }
-      [contenteditable] h1 { font-size: 1.8em; font-weight: 700; margin: 0.2em 0; }
-      [contenteditable] h2 { font-size: 1.4em; font-weight: 600; margin: 0.2em 0; }
-      [contenteditable] h3 { font-size: 1.15em; font-weight: 600; margin: 0.2em 0; }
-      [contenteditable] ul, [contenteditable] ol { padding-left: 1.2em; margin: 0.2em 0; }
-      [contenteditable] p { margin: 0.15em 0; }
-      ::-webkit-scrollbar { width: 6px; height: 6px; }
-      ::-webkit-scrollbar-thumb { background: #DDE4DF; border-radius: 3px; }
-      ::-webkit-scrollbar-track { background: transparent; }
-    `}</style>
+    <>
+      {/* Viewport Meta for Mobile (Prevents weird zooming and text selection issues) */}
+      <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+      <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        html, body {
+          height: 100%; margin: 0; padding: 0;
+          overscroll-behavior: none;
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          -webkit-font-smoothing: antialiased;
+        }
+        * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+        [contenteditable]:empty:before {
+          content: attr(data-placeholder);
+          color: #B0B7B2;
+          pointer-events: none;
+        }
+        [contenteditable] b, [contenteditable] strong { font-weight: 700; }
+        [contenteditable] i, [contenteditable] em { font-style: italic; }
+        [contenteditable] u { text-decoration: underline; }
+        [contenteditable] s, [contenteditable] strike { text-decoration: line-through; }
+        [contenteditable] h1 { font-size: 1.8em; font-weight: 700; margin: 0.2em 0; }
+        [contenteditable] h2 { font-size: 1.4em; font-weight: 600; margin: 0.2em 0; }
+        [contenteditable] h3 { font-size: 1.15em; font-weight: 600; margin: 0.2em 0; }
+        [contenteditable] ul, [contenteditable] ol { padding-left: 1.2em; margin: 0.2em 0; }
+        [contenteditable] p { margin: 0.15em 0; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: #DDE4DF; border-radius: 3px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+      `}</style>
+    </>
   )
 }
 
 /* ============================================================
-   EDITABLE — saves on input, blur, AND unmount
+   EDITABLE — Mobile-First (Saves safely, no cursor jumps)
    ============================================================ */
 const Editable = memo(function Editable({ html, onSave, className = '', placeholder = '' }) {
   const ref = useRef(null)
-  const last = useRef(html)
+  const lastSavedHtml = useRef(html)
   const timer = useRef(null)
+  const isFocused = useRef(false)
 
+  // Sync external changes ONLY when not actively editing
   useEffect(() => {
-    if (ref.current && ref.current.innerHTML !== html && document.activeElement !== ref.current) {
+    if (!isFocused.current && ref.current && ref.current.innerHTML !== html) {
       ref.current.innerHTML = html
-      last.current = html
+      lastSavedHtml.current = html
     }
   }, [html])
 
-  // Flush on unmount
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current)
-    if (ref.current) {
-      const clean = sanitizeHtml(ref.current.innerHTML)
-      if (clean !== last.current) {
-        last.current = clean
-        onSave(clean)
-      }
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
   const commit = () => {
     if (!ref.current) return
-    const clean = sanitizeHtml(ref.current.innerHTML)
-    if (clean !== last.current) {
-      last.current = clean
-      onSave(clean)
+    try {
+      const currentHtml = ref.current.innerHTML || ''
+      const clean = sanitizeHtml(currentHtml)
+      if (clean !== lastSavedHtml.current) {
+        lastSavedHtml.current = clean
+        onSave(clean)
+      }
+    } catch (err) {
+      console.warn("Save interrupted", err)
     }
   }
+
+  useEffect(() => {
+    return () => {
+      if (timer.current) clearTimeout(timer.current)
+    }
+  }, [])
 
   return (
     <div
@@ -175,6 +178,13 @@ const Editable = memo(function Editable({ html, onSave, className = '', placehol
       className={`outline-none focus:outline-none ${className}`}
       onPointerDown={e => e.stopPropagation()}
       onMouseDown={e => e.stopPropagation()}
+      onTouchStart={e => e.stopPropagation()}
+      onFocus={() => { isFocused.current = true }}
+      onBlur={() => {
+        isFocused.current = false
+        if (timer.current) clearTimeout(timer.current)
+        commit()
+      }}
       onPaste={e => {
         e.preventDefault()
         const text = e.clipboardData.getData('text/plain')
@@ -182,11 +192,8 @@ const Editable = memo(function Editable({ html, onSave, className = '', placehol
       }}
       onInput={() => {
         if (timer.current) clearTimeout(timer.current)
-        timer.current = setTimeout(commit, 120)
-      }}
-      onBlur={() => {
-        if (timer.current) clearTimeout(timer.current)
-        commit()
+        // 350ms delay protects against iOS keyboard backwards-typing glitch
+        timer.current = setTimeout(commit, 350)
       }}
       dangerouslySetInnerHTML={{ __html: html || '' }}
     />
@@ -354,7 +361,7 @@ function SelectionToolbar() {
 }
 
 /* ============================================================
-   NODE CARD — with input gating
+   NODE CARD
    ============================================================ */
 const NodeRow = memo(function NodeRow({
   t, isSel,
@@ -366,7 +373,7 @@ const NodeRow = memo(function NodeRow({
   const accent = t.color || G
   const isComment = t.role === 'comment'
   const titlePlaceholder = isComment ? 'Comment…' : 'Topic title…'
-  const titleReady = hasText(t.title)  // gate for subtopics and children
+  const titleReady = hasText(t.title)
 
   return (
     <motion.div
@@ -527,16 +534,6 @@ const NodeRow = memo(function NodeRow({
             cursor: titleReady ? 'pointer' : 'not-allowed',
             opacity: titleReady ? 1 : 0.5
           }}
-          onMouseEnter={e => {
-            if (titleReady) {
-              e.currentTarget.style.background = `${accent}15`
-              e.currentTarget.style.borderColor = accent
-            }
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.borderColor = titleReady ? `${accent}66` : '#DDE4DF'
-          }}
         >
           <Plus size={12} /> <ArrowRight size={12} />
         </motion.button>
@@ -553,16 +550,6 @@ const NodeRow = memo(function NodeRow({
             color: titleReady ? accent : '#B0B7B2',
             cursor: titleReady ? 'pointer' : 'not-allowed',
             opacity: titleReady ? 1 : 0.5
-          }}
-          onMouseEnter={e => {
-            if (titleReady) {
-              e.currentTarget.style.background = `${accent}15`
-              e.currentTarget.style.borderColor = accent
-            }
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.borderColor = titleReady ? `${accent}66` : '#DDE4DF'
           }}
         >
           <Plus size={12} /> <ArrowDown size={12} />
@@ -760,7 +747,7 @@ export default function Page() {
   const addRight = useCallback((afterId) => {
     const t = docR.current.find(t => t.id === afterId)
     if (!t) return
-    if (!hasText(t.title)) return  // gate
+    if (!hasText(t.title)) return
     const el = document.getElementById(t.id)
     const w = el ? el.offsetWidth : 400
     const nt = mkNode(t.x + w + 32, t.y, {
@@ -774,7 +761,7 @@ export default function Page() {
   const addBelow = useCallback((afterId) => {
     const t = docR.current.find(t => t.id === afterId)
     if (!t) return
-    if (!hasText(t.title)) return  // gate
+    if (!hasText(t.title)) return
     const el = document.getElementById(t.id)
     const h = el ? el.offsetHeight : 200
     const nt = mkNode(t.x, t.y + h + 32, {
@@ -801,7 +788,7 @@ export default function Page() {
   /* ---------- Subtopic / note operations (gated) ---------- */
   const onSubAdd = useCallback((tid, slot) => {
     const node = docR.current.find(t => t.id === tid)
-    if (!node || !hasText(node.title)) return  // gate
+    if (!node || !hasText(node.title)) return
     upd(tid, x => {
       const subs = [...x.subs]
       subs[slot] = mkSub()
@@ -820,7 +807,7 @@ export default function Page() {
     const node = docR.current.find(t => t.id === tid)
     if (!node) return
     const sub = node.subs.find(q => q && q.id === sid)
-    if (!sub || !hasText(sub.html)) return  // gate
+    if (!sub || !hasText(sub.html)) return
     upd(tid, x => ({
       ...x, subs: x.subs.map(q => q && q.id === sid ? { ...q, notes: [...q.notes, { id: uid(), html: '' }] } : q)
     }))
@@ -972,7 +959,7 @@ export default function Page() {
   const down = e => {
     if (e.target.closest('[data-ui]')) return
 
-    // FLUSH any focused editable BEFORE mutating state
+    // Flush any focused editable BEFORE mutating state
     if (!e.target.closest('[data-editable]')) {
       const active = document.activeElement
       if (active && active.isContentEditable) {
@@ -1014,7 +1001,7 @@ export default function Page() {
   /* ---------- Export / Import ---------- */
   const exportJ = () => {
     const b = new Blob(
-      [JSON.stringify({ app: 'NoteS', version: 7, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
+      [JSON.stringify({ app: 'NoteS', version: 8, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
       { type: 'application/json' }
     )
     const a = document.createElement('a')
