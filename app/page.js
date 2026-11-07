@@ -12,7 +12,7 @@ import {
    CONSTANTS
    ============================================================ */
 const G = '#42A879'
-const KEY = 'notes-workspace-v32'
+const KEY = 'notes-workspace-v33'
 const COLORS = ['#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444', '#202522']
 const TXT_COLORS = ['#202522', '#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444']
 const HIGHLIGHTS = ['#FEF3C7', '#DBEAFE', '#DCFCE7', '#FCE7F3', '#EDE9FE', 'transparent']
@@ -172,7 +172,6 @@ function GlobalStyles() {
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-thumb { background: #DDE4DF; border-radius: 3px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        /* Ascunde scrollbar-ul pe toolbar-ul mobil dar pastreaza functionalitatea */
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
@@ -879,7 +878,7 @@ export default function Page() {
     if (!ready.current || loadFailed.current) return
     setSaved(false)
     setSaveError(false)
-    const payload = JSON.stringify({ app: 'NoteS', version: 32, topics: doc, view })
+    const payload = JSON.stringify({ app: 'NoteS', version: 33, topics: doc, view })
     const flush = () => {
       if (loadFailed.current) return
       try {
@@ -1051,7 +1050,7 @@ export default function Page() {
   }, [upd])
 
   /* ============================================================
-     TOUCH / POINTER ENGINE (Protejat Anti-Crash)
+     TOUCH / POINTER ENGINE (Prioritate 2 degete)
      ============================================================ */
   useEffect(() => {
     const el = cv.current
@@ -1091,6 +1090,7 @@ export default function Page() {
     }
 
     const tstart = e => {
+      // Daca sunt 2 degete, fortam oprirea oricarei actiuni de drag/select
       if (e.touches.length >= 2) {
         drag.current = null
         const [a, b] = e.touches
@@ -1105,7 +1105,7 @@ export default function Page() {
     }
 
     const tmove = e => {
-      // Protectie esentiala: verificam daca pinch.current exista
+      // Ne asiguram ca avem 2 degete si ca obiectul pinch exista
       if (!pinch.current || !e.touches || e.touches.length < 2) return
       e.preventDefault()
       const [a, b] = e.touches
@@ -1113,7 +1113,7 @@ export default function Page() {
       const cx = (a.clientX + b.clientX) / 2
       const cy = (a.clientY + b.clientY) / 2
       
-      // Protectie la eroarea 'ed.current.cx' null
+      // Protectie esentiala anti-crash
       if (!pinch.current) return
       
       const f = dist / pinch.current.dist
@@ -1235,7 +1235,7 @@ export default function Page() {
   /* ---------- Export / Import ---------- */
   const exportJ = () => {
     const b = new Blob(
-      [JSON.stringify({ app: 'NoteS', version: 32, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
+      [JSON.stringify({ app: 'NoteS', version: 33, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
       { type: 'application/json' }
     )
     const a = document.createElement('a')
@@ -1250,7 +1250,7 @@ export default function Page() {
     r.onload = () => {
       try {
         const j = JSON.parse(r.result)
-        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 32)) throw 0
+        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 33)) throw 0
         if (confirm('Replace the current workspace with this project?')) {
           snap()
           const topics = normalizeProjectTopics(j.topics)
