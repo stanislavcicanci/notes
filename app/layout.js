@@ -20,13 +20,12 @@ return (
         <body>
         {children}
 
-        {process.env.NODE_ENV === 'development' && (
             <Script
             src="https://cdn.jsdelivr.net/npm/eruda"
             strategy="afterInteractive"
             onLoad={() => window.eruda.init()}
             />
-        )}
+    
     </body>
     </html>
 )
