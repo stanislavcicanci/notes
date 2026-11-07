@@ -12,7 +12,7 @@ import {
    CONSTANTS
    ============================================================ */
 const G = '#42A879'
-const KEY = 'notes-workspace-v33'
+const KEY = 'notes-workspace-v34'
 const COLORS = ['#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444', '#202522']
 const TXT_COLORS = ['#202522', '#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444']
 const HIGHLIGHTS = ['#FEF3C7', '#DBEAFE', '#DCFCE7', '#FCE7F3', '#EDE9FE', 'transparent']
@@ -878,7 +878,7 @@ export default function Page() {
     if (!ready.current || loadFailed.current) return
     setSaved(false)
     setSaveError(false)
-    const payload = JSON.stringify({ app: 'NoteS', version: 33, topics: doc, view })
+    const payload = JSON.stringify({ app: 'NoteS', version: 34, topics: doc, view })
     const flush = () => {
       if (loadFailed.current) return
       try {
@@ -1050,7 +1050,7 @@ export default function Page() {
   }, [upd])
 
   /* ============================================================
-     TOUCH / POINTER ENGINE (Prioritate 2 degete)
+     TOUCH / POINTER ENGINE (Anti-Crash & Prioritate Zoom)
      ============================================================ */
   useEffect(() => {
     const el = cv.current
@@ -1090,9 +1090,12 @@ export default function Page() {
     }
 
     const tstart = e => {
-      // Daca sunt 2 degete, fortam oprirea oricarei actiuni de drag/select
+      // Cand al doilea deget atinge ecranul, fortam anularea oricarei selectii/editari
       if (e.touches.length >= 2) {
         drag.current = null
+        const active = document.activeElement
+        if (active && active.isContentEditable) active.blur()
+        
         const [a, b] = e.touches
         pinch.current = {
           dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
@@ -1105,19 +1108,18 @@ export default function Page() {
     }
 
     const tmove = e => {
-      // Ne asiguram ca avem 2 degete si ca obiectul pinch exista
+      // Protectie absoluta: daca nu e definit pinch sau avem mai putin de 2 degete, nu facem nimic
       if (!pinch.current || !e.touches || e.touches.length < 2) return
       e.preventDefault()
+      
       const [a, b] = e.touches
       const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
       const cx = (a.clientX + b.clientX) / 2
       const cy = (a.clientY + b.clientY) / 2
       
-      // Protectie esentiala anti-crash
-      if (!pinch.current) return
-      
       const f = dist / pinch.current.dist
       const z = Math.min(3, Math.max(0.1, viewR.current.z * f))
+      
       setView(v => {
         const k = z / v.z
         let nx = cx - (cx - v.x) * k
@@ -1126,10 +1128,17 @@ export default function Page() {
         ny += cy - pinch.current.cy
         return { z, x: nx, y: ny }
       })
+      
       pinch.current = { ...pinch.current, dist, cx, cy }
     }
 
-    const tend = e => { if (!e.touches || e.touches.length < 2) { pinch.current = null; drag.current = null } }
+    const tend = e => { 
+      // Cand un deget se ridica si nu mai avem 2, oprim pinch-ul
+      if (!e.touches || e.touches.length < 2) { 
+        pinch.current = null
+        drag.current = null 
+      } 
+    }
 
     const key = e => {
       const ed = e.target.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)
@@ -1235,7 +1244,7 @@ export default function Page() {
   /* ---------- Export / Import ---------- */
   const exportJ = () => {
     const b = new Blob(
-      [JSON.stringify({ app: 'NoteS', version: 33, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
+      [JSON.stringify({ app: 'NoteS', version: 34, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
       { type: 'application/json' }
     )
     const a = document.createElement('a')
@@ -1250,7 +1259,7 @@ export default function Page() {
     r.onload = () => {
       try {
         const j = JSON.parse(r.result)
-        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 33)) throw 0
+        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 34)) throw 0
         if (confirm('Replace the current workspace with this project?')) {
           snap()
           const topics = normalizeProjectTopics(j.topics)
