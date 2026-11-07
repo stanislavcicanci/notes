@@ -1,32 +1,26 @@
 
 import './globals.css'
-import Script from 'next/script'
+import Eruda from './Eruda'
 
 export const metadata = {
-    title: 'NoteS',
-    description: 'Infinite notes canvas'
+  title: 'NoteS',
+  description: 'Infinite notes canvas'
 }
 
 export const viewport = {
-    width: 'device-width',
-    initialScale: 1,
-    maximumScale: 1,
-    userScalable: false
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false
 }
 
 export default function L({ children }) {
-return (
+  return (
     <html lang="en">
-        <body>
+      <body>
         {children}
-
-            <Script
-            src="https://cdn.jsdelivr.net/npm/eruda"
-            strategy="afterInteractive"
-            onLoad={() => window.eruda.init()}
-            />
-    
-    </body>
+        <Eruda />
+      </body>
     </html>
-)
+  )
 }
