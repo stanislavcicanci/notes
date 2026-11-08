@@ -5,14 +5,14 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Type, MousePointer2, Undo2, Redo2, Download, Upload, Plus, Trash2, Copy, Check,
   Bold, Italic, Underline, Minus, Maximize, Home, X, GripHorizontal, Search,
-  Palette, Focus, StickyNote, ArrowRight, ArrowDown, AlertTriangle, Highlighter, ChevronDown
+  Palette, Focus, StickyNote, ArrowRight, ArrowDown, AlertTriangle, Highlighter, ChevronDown, Edit3
 } from 'lucide-react'
 
 /* ============================================================
    CONSTANTS
    ============================================================ */
 const G = '#42A879'
-const KEY = 'notes-workspace-v34'
+const KEY = 'notes-workspace-v35'
 const COLORS = ['#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444', '#202522']
 const TXT_COLORS = ['#202522', '#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444']
 const HIGHLIGHTS = ['#FEF3C7', '#DBEAFE', '#DCFCE7', '#FCE7F3', '#EDE9FE', 'transparent']
@@ -142,7 +142,7 @@ const cloneNode = (t, dx = 40) => {
 function GlobalStyles() {
   return (
     <>
-      <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+      <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         html, body {
@@ -180,9 +180,9 @@ function GlobalStyles() {
 }
 
 /* ============================================================
-   EDITABLE
+   EDITABLE — Doar citește dacă nu ești în modul de editare
    ============================================================ */
-const Editable = memo(function Editable({ html, onSave, onEditStart, targetId, highlighted = false, className = '', placeholder = '' }) {
+const Editable = memo(function Editable({ html, onSave, onEditStart, targetId, highlighted = false, className = '', placeholder = '', readOnly = false }) {
   const ref = useRef(null)
   const lastSavedHtml = useRef(html || '')
   const isFocused = useRef(false)
@@ -215,19 +215,19 @@ const Editable = memo(function Editable({ html, onSave, onEditStart, targetId, h
     <div
       ref={ref}
       id={targetId ? `editable-${targetId}` : undefined}
-      contentEditable
+      contentEditable={!readOnly}
       suppressContentEditableWarning
-      spellCheck
+      spellCheck={!readOnly}
       role="textbox"
       aria-multiline="true"
-      data-editable
+      data-editable={!readOnly}
       data-placeholder={placeholder}
-      className={`focus:outline-none ${highlighted ? 'rounded-sm ring-2 ring-[#42A879] bg-[#42A879]/10' : ''} ${className}`}
+      className={`focus:outline-none ${highlighted ? 'rounded-sm ring-2 ring-[#42A879] bg-[#42A879]/10' : ''} ${readOnly ? 'pointer-events-none' : ''} ${className}`}
       onPointerDown={e => e.stopPropagation()}
       onMouseDown={e => e.stopPropagation()}
       onTouchStart={e => e.stopPropagation()}
       onFocus={() => {
-        if (!isFocused.current) {
+        if (!readOnly && !isFocused.current) {
           isFocused.current = true
           onEditStart?.()
         }
@@ -421,7 +421,7 @@ function SelectionToolbar() {
         const range = sel.getRangeAt(0)
         let node = range.commonAncestorContainer
         if (node.nodeType === 3) node = node.parentNode
-        const editable = node.closest?.('[data-editable]')
+        const editable = node.closest?.('[data-editable="true"]')
         if (!editable) { setState(null); editableRef.current = null; return }
         const rect = range.getBoundingClientRect()
         if (rect.width === 0 && rect.height === 0) { setState(null); return }
@@ -551,11 +551,11 @@ function SelectionToolbar() {
 }
 
 /* ============================================================
-   NODE CARD
+   NODE CARD — Modificat pentru Mobile Editing
    ============================================================ */
 const NodeRow = memo(function NodeRow({
-  t, isSel, searchHit,
-  onStartDrag, onFocus, onDup, onDelete,
+  t, isSel, searchHit, isMobileEditing, isMobile,
+  onStartDrag, onFocus, onDup, onDelete, onSelect,
   onChangeColor, onTitleSave, onSubSave, onSubAdd, onSubDelete,
   onNoteAdd, onNoteSave, onNoteDelete, onEditStart,
   onAddRight, onAddBelow
@@ -565,20 +565,32 @@ const NodeRow = memo(function NodeRow({
   const titlePlaceholder = isComment ? 'Comment…' : 'Topic title…'
   const titleReady = hasText(t.title)
 
+  const wrapperProps = isMobile ? {
+    onPointerDown: (e) => {
+      if (e.target.closest('button') || e.target.closest('[data-editable]')) return
+      onSelect(t.id)
+    }
+  } : {
+    onPointerDown: (e) => onStartDrag(e, t),
+    onDoubleClick: () => onFocus(t)
+  }
+
   return (
     <motion.div
       id={t.id}
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.2 }}
-      onPointerDown={e => onStartDrag(e, t)}
-      onDoubleClick={() => onFocus(t)}
+      {...wrapperProps}
       style={{
         position: 'absolute', left: t.x, top: t.y,
         borderColor: accent,
-        boxShadow: isSel ? `0 0 0 4px ${accent}33` : '0 1px 3px rgba(0,0,0,0.04)'
+        boxShadow: isSel ? `0 0 0 4px ${accent}33` : '0 1px 3px rgba(0,0,0,0.04)',
+        zIndex: isSel ? 20 : 10
       }}
-      className={`w-max max-w-[90vw] bg-white ${isComment ? 'border rounded-lg p-3' : 'border-2 rounded-xl p-4'} cursor-move`}
+      className={`w-max max-w-[90vw] bg-white ${isComment ? 'border rounded-lg p-3' : 'border-2 rounded-xl p-4'} ${
+        isMobile && !isMobileEditing ? 'cursor-pointer' : 'cursor-move'
+      }`}
     >
       <div className="flex items-center gap-2 mb-2">
         <GripHorizontal size={14} className="text-[#8B928E] cursor-move shrink-0" />
@@ -592,15 +604,29 @@ const NodeRow = memo(function NodeRow({
           <span className="text-[9px] text-[#B0B7B2] italic">write a title first…</span>
         )}
         <div className="flex-1" />
-        <button title="Focus" onClick={() => onFocus(t)} className="p-1" style={{ color: '#8B928E' }}>
-          <Focus size={14} />
-        </button>
-        <button title="Duplicate" onClick={() => onDup(t)} className="p-1" style={{ color: '#8B928E' }}>
-          <Copy size={14} />
-        </button>
-        <button title="Delete" onClick={() => onDelete(t.id)} className="p-1" style={{ color: '#8B928E' }}>
-          <Trash2 size={14} />
-        </button>
+        {isMobile && !isMobileEditing ? (
+          isSel && (
+            <button
+              onClick={() => onFocus(t)}
+              className="flex items-center justify-center gap-1 px-3 h-8 rounded-full text-white shadow-lg animate-bounce"
+              style={{ background: G, zIndex: 30 }}
+            >
+              <Edit3 size={14} /> Edit
+            </button>
+          )
+        ) : (
+          <>
+            <button title="Focus" onClick={() => onFocus(t)} className="p-1" style={{ color: '#8B928E' }}>
+              <Focus size={14} />
+            </button>
+            <button title="Duplicate" onClick={() => onDup(t)} className="p-1" style={{ color: '#8B928E' }}>
+              <Copy size={14} />
+            </button>
+            <button title="Delete" onClick={() => onDelete(t.id)} className="p-1" style={{ color: '#8B928E' }}>
+              <Trash2 size={14} />
+            </button>
+          </>
+        )}
       </div>
 
       <div className="flex items-start gap-1 mb-3">
@@ -610,6 +636,7 @@ const NodeRow = memo(function NodeRow({
           highlighted={searchHit === t.id}
           onEditStart={onEditStart}
           onSave={h => onTitleSave(t.id, h)}
+          readOnly={isMobile && !isMobileEditing}
           className={`${isComment ? 'text-base' : 'text-xl'} font-semibold min-w-[120px] flex-1 cursor-text`}
           placeholder={titlePlaceholder}
         />
@@ -633,13 +660,14 @@ const NodeRow = memo(function NodeRow({
                       highlighted={searchHit === s.id}
                       onEditStart={onEditStart}
                       onSave={h => onSubSave(t.id, s.id, h)}
+                      readOnly={isMobile && !isMobileEditing}
                       className={`flex-1 ${isComment ? 'text-[13px]' : 'text-[15px]'} min-h-[22px] cursor-text font-medium`}
                       placeholder="Subtopic…"
                     />
                     <button
                       title="Delete subtopic"
                       onClick={() => onSubDelete(t.id, s.id)}
-                      className="text-[#8B928E] hover:text-red-500 opacity-100 sm:opacity-0 sm:group-hover/sub:opacity-100 shrink-0 min-w-8 min-h-8 grid place-items-center"
+                      className={`text-[#8B928E] hover:text-red-500 shrink-0 min-w-8 min-h-8 grid place-items-center ${isMobile && !isMobileEditing ? 'hidden' : 'opacity-100 sm:opacity-0 sm:group-hover/sub:opacity-100'}`}
                     ><X size={12} /></button>
                   </div>
                   <div className="mt-2 flex flex-col gap-1.5">
@@ -655,40 +683,43 @@ const NodeRow = memo(function NodeRow({
                           highlighted={searchHit === n.id}
                           onEditStart={onEditStart}
                           onSave={h => onNoteSave(t.id, s.id, n.id, h)}
+                          readOnly={isMobile && !isMobileEditing}
                           className="flex-1 min-h-[16px] cursor-text"
                           placeholder="Note"
                         />
                         <button
                           onClick={() => onNoteDelete(t.id, s.id, n.id)}
-                          className="text-[#8B928E] hover:text-red-500 opacity-100 sm:opacity-0 sm:group-hover/note:opacity-100 shrink-0 min-w-8 min-h-8 grid place-items-center"
+                          className={`text-[#8B928E] hover:text-red-500 shrink-0 min-w-8 min-h-8 grid place-items-center ${isMobile && !isMobileEditing ? 'hidden' : 'opacity-100 sm:opacity-0 sm:group-hover/note:opacity-100'}`}
                         ><X size={12} /></button>
                       </div>
                     ))}
                   </div>
-                  <button
-                    onClick={() => onNoteAdd(t.id, s.id)}
-                    disabled={!subReady}
-                    title={subReady ? 'Add another note' : 'Write the subtopic first'}
-                    className={`mt-2 flex items-center gap-1 text-xs ${subReady ? 'hover:opacity-100' : 'opacity-30 cursor-not-allowed'}`}
-                    style={{ color: accent }}
-                  >
-                    <Plus size={12} /> note
-                  </button>
+                  {(!isMobile || isMobileEditing) && (
+                    <button
+                      onClick={() => onNoteAdd(t.id, s.id)}
+                      disabled={!subReady}
+                      title={subReady ? 'Add another note' : 'Write the subtopic first'}
+                      className={`mt-2 flex items-center gap-1 text-xs ${subReady ? 'hover:opacity-100' : 'opacity-30 cursor-not-allowed'}`}
+                      style={{ color: accent }}
+                    >
+                      <Plus size={12} /> note
+                    </button>
+                  )}
                 </>
               ) : (
                 <button
                   onClick={() => onSubAdd(t.id, si)}
-                  disabled={!titleReady}
+                  disabled={!titleReady || (isMobile && !isMobileEditing)}
                   title={titleReady ? 'Add subtopic here' : 'Write a title first'}
                   className="flex-1 min-h-[90px] flex flex-col items-center justify-center gap-1 rounded-md border border-dashed transition-colors"
                   style={{
                     color: titleReady ? accent : '#B0B7B2',
                     borderColor: 'transparent',
-                    cursor: titleReady ? 'pointer' : 'not-allowed',
-                    opacity: titleReady ? 1 : 0.4
+                    cursor: titleReady && (!isMobile || isMobileEditing) ? 'pointer' : 'not-allowed',
+                    opacity: titleReady && (!isMobile || isMobileEditing) ? 1 : 0.4
                   }}
                   onMouseEnter={e => {
-                    if (titleReady) {
+                    if (titleReady && (!isMobile || isMobileEditing)) {
                       e.currentTarget.style.borderColor = accent
                       e.currentTarget.style.background = `${accent}0d`
                     }
@@ -709,53 +740,57 @@ const NodeRow = memo(function NodeRow({
         })}
       </div>
 
-      <div className="flex items-center gap-1 mt-3 pt-2 border-t" style={{ borderColor: `${accent}22` }}>
-        <Palette size={12} className="mr-1" style={{ color: '#8B928E' }} />
-        {COLORS.map(c => (
-          <button
-            key={c}
-            onClick={() => onChangeColor(t.id, c)}
-            className="h-4 w-4 rounded-full border border-white shadow-sm hover:scale-125 transition-transform"
-            style={{ background: c, outline: t.color === c ? `1.5px solid ${c}` : 'none', outlineOffset: 1 }}
-          />
-        ))}
+      {(!isMobile || isMobileEditing) && (
+        <>
+          <div className="flex items-center gap-1 mt-3 pt-2 border-t" style={{ borderColor: `${accent}22` }}>
+            <Palette size={12} className="mr-1" style={{ color: '#8B928E' }} />
+            {COLORS.map(c => (
+              <button
+                key={c}
+                onClick={() => onChangeColor(t.id, c)}
+                className="h-4 w-4 rounded-full border border-white shadow-sm hover:scale-125 transition-transform"
+                style={{ background: c, outline: t.color === c ? `1.5px solid ${c}` : 'none', outlineOffset: 1 }}
+              />
+            ))}
 
-        <div className="flex-1" />
+            <div className="flex-1" />
 
-        <motion.button
-          whileTap={{ scale: 0.9 }}
-          whileHover={{ scale: 1.05 }}
-          onClick={() => onAddRight(t.id)}
-          disabled={!titleReady}
-          title={titleReady ? 'Add new comment to the right' : 'Write a title first'}
-          className="h-8 px-2 rounded-md border-2 border-dashed flex items-center gap-1 text-xs transition-colors outline-none focus:outline-none focus:ring-0"
-          style={{
-            borderColor: titleReady ? `${accent}66` : '#DDE4DF',
-            color: titleReady ? accent : '#B0B7B2',
-            cursor: titleReady ? 'pointer' : 'not-allowed',
-            opacity: titleReady ? 1 : 0.5
-          }}
-        >
-          <Plus size={12} /> <ArrowRight size={12} />
-        </motion.button>
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              whileHover={{ scale: 1.05 }}
+              onClick={() => onAddRight(t.id)}
+              disabled={!titleReady}
+              title={titleReady ? 'Add new comment to the right' : 'Write a title first'}
+              className="h-8 px-2 rounded-md border-2 border-dashed flex items-center gap-1 text-xs transition-colors outline-none focus:outline-none focus:ring-0"
+              style={{
+                borderColor: titleReady ? `${accent}66` : '#DDE4DF',
+                color: titleReady ? accent : '#B0B7B2',
+                cursor: titleReady ? 'pointer' : 'not-allowed',
+                opacity: titleReady ? 1 : 0.5
+              }}
+            >
+              <Plus size={12} /> <ArrowRight size={12} />
+            </motion.button>
 
-        <motion.button
-          whileTap={{ scale: 0.9 }}
-          whileHover={{ scale: 1.05 }}
-          onClick={() => onAddBelow(t.id)}
-          disabled={!titleReady}
-          title={titleReady ? 'Add new comment below' : 'Write a title first'}
-          className="h-8 px-2 rounded-md border-2 border-dashed flex items-center gap-1 text-xs transition-colors outline-none focus:outline-none focus:ring-0"
-          style={{
-            borderColor: titleReady ? `${accent}66` : '#DDE4DF',
-            color: titleReady ? accent : '#B0B7B2',
-            cursor: titleReady ? 'pointer' : 'not-allowed',
-            opacity: titleReady ? 1 : 0.5
-          }}
-        >
-          <Plus size={12} /> <ArrowDown size={12} />
-        </motion.button>
-      </div>
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              whileHover={{ scale: 1.05 }}
+              onClick={() => onAddBelow(t.id)}
+              disabled={!titleReady}
+              title={titleReady ? 'Add new comment below' : 'Write a title first'}
+              className="h-8 px-2 rounded-md border-2 border-dashed flex items-center gap-1 text-xs transition-colors outline-none focus:outline-none focus:ring-0"
+              style={{
+                borderColor: titleReady ? `${accent}66` : '#DDE4DF',
+                color: titleReady ? accent : '#B0B7B2',
+                cursor: titleReady ? 'pointer' : 'not-allowed',
+                opacity: titleReady ? 1 : 0.5
+              }}
+            >
+              <Plus size={12} /> <ArrowDown size={12} />
+            </motion.button>
+          </div>
+        </>
+      )}
     </motion.div>
   )
 })
@@ -819,6 +854,7 @@ export default function Page() {
   const [tool, setTool] = useState('v')
   const [draft, setDraft] = useState(null)
   const [sel, setSel] = useState(null)
+  const [editMode, setEditMode] = useState(null) // null = navigare, id = editare
   const [saved, setSaved] = useState(true)
   const [saveError, setSaveError] = useState(false)
   const [anim, setAnim] = useState(false)
@@ -827,6 +863,14 @@ export default function Page() {
   const [search, setSearch] = useState('')
   const [showSearch, setShowSearch] = useState(false)
   const [searchHit, setSearchHit] = useState(null)
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   const past = useRef([]), future = useRef([])
   const drag = useRef(null), space = useRef(false), pinch = useRef(null)
@@ -878,7 +922,7 @@ export default function Page() {
     if (!ready.current || loadFailed.current) return
     setSaved(false)
     setSaveError(false)
-    const payload = JSON.stringify({ app: 'NoteS', version: 34, topics: doc, view })
+    const payload = JSON.stringify({ app: 'NoteS', version: 35, topics: doc, view })
     const flush = () => {
       if (loadFailed.current) return
       try {
@@ -925,11 +969,19 @@ export default function Page() {
 
   const focusTopic = useCallback(t => {
     setFocus(t.id)
+    setEditMode(t.id) // Activăm modul de editare
     const el = document.getElementById(t.id)
     if (!el) return
     const z = Math.min(1.3, (innerWidth - 60) / el.offsetWidth, (innerHeight - 140) / el.offsetHeight)
     fly({ z, x: innerWidth / 2 - (t.x + el.offsetWidth / 2) * z, y: innerHeight / 2 - (t.y + el.offsetHeight / 2) * z })
   }, [fly])
+
+  const exitEditMode = () => {
+    setFocus(null)
+    setEditMode(null)
+    // Scoatem orice focus de pe text
+    if (document.activeElement) document.activeElement.blur()
+  }
 
   const dup = useCallback(t => {
     const el = document.getElementById(t.id)
@@ -1090,7 +1142,6 @@ export default function Page() {
     }
 
     const tstart = e => {
-      // Cand al doilea deget atinge ecranul, fortam anularea oricarei selectii/editari
       if (e.touches.length >= 2) {
         drag.current = null
         const active = document.activeElement
@@ -1108,7 +1159,6 @@ export default function Page() {
     }
 
     const tmove = e => {
-      // Protectie absoluta: daca nu e definit pinch sau avem mai putin de 2 degete, nu facem nimic
       if (!pinch.current || !e.touches || e.touches.length < 2) return
       e.preventDefault()
       
@@ -1133,7 +1183,6 @@ export default function Page() {
     }
 
     const tend = e => { 
-      // Cand un deget se ridica si nu mai avem 2, oprim pinch-ul
       if (!e.touches || e.touches.length < 2) { 
         pinch.current = null
         drag.current = null 
@@ -1171,7 +1220,7 @@ export default function Page() {
       else if (k === 'delete' || k === 'backspace') { if (sel) setAsk(sel) }
       else if (k === 'escape') {
         setAsk(null); setDraft(null); setSel(null); setTool('v')
-        setFocus(null); setShowSearch(false)
+        setFocus(null); setShowSearch(false); setEditMode(null)
       }
     }
     const keyup = e => { if (e.code === 'Space') space.current = false }
@@ -1198,19 +1247,20 @@ export default function Page() {
       removeEventListener('keydown', key)
       removeEventListener('keyup', keyup)
     }
-  }, [sel, undo, redo, zoomC, zoomAt, fly, dup, focusTopic])
+  }, [sel, undo, redo, zoomC, zoomAt, fly, dup, focusTopic, showSearch])
 
   const down = e => {
     if (e.target.closest('[data-ui]')) return
+    if (e.target.closest('[data-editable]') && !isMobile) return
 
-    if (!e.target.closest('[data-editable]')) {
+    if (isMobile) {
+      if (e.target.closest('[data-editable]') && editMode) return
+      setSel(null)
+    } else {
       const active = document.activeElement
-      if (active && active.isContentEditable) {
-        active.blur()
-      }
+      if (active && active.isContentEditable) active.blur()
+      if (e.target.closest('[data-editable]')) return
     }
-
-    if (e.target.closest('[data-editable]')) return
 
     if (e.button === 1) {
       e.preventDefault()
@@ -1222,7 +1272,7 @@ export default function Page() {
       setDraft({ x: (e.clientX - v.x) / v.z, y: (e.clientY - v.y) / v.z })
       return
     }
-    setSel(null); setDraft(null)
+    setDraft(null)
     drag.current = { type: 'pan', sx: e.clientX, sy: e.clientY, ox: v.x, oy: v.y }
   }
 
@@ -1230,7 +1280,7 @@ export default function Page() {
     if (e.target.closest('button') || e.target.isContentEditable) { e.stopPropagation(); return }
     if (pinch.current) return
     e.stopPropagation()
-    setSel(t.id)
+    if (!isMobile) setSel(t.id)
     drag.current = { type: 'topic', id: t.id, sx: e.clientX, sy: e.clientY, ox: t.x, oy: t.y, moved: false }
   }
 
@@ -1244,7 +1294,7 @@ export default function Page() {
   /* ---------- Export / Import ---------- */
   const exportJ = () => {
     const b = new Blob(
-      [JSON.stringify({ app: 'NoteS', version: 34, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
+      [JSON.stringify({ app: 'NoteS', version: 35, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
       { type: 'application/json' }
     )
     const a = document.createElement('a')
@@ -1259,13 +1309,13 @@ export default function Page() {
     r.onload = () => {
       try {
         const j = JSON.parse(r.result)
-        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 34)) throw 0
+        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 35)) throw 0
         if (confirm('Replace the current workspace with this project?')) {
           snap()
           const topics = normalizeProjectTopics(j.topics)
           loadFailed.current = false
           setDoc(topics)
-          setSel(null); setFocus(null)
+          setSel(null); setFocus(null); setEditMode(null)
           const v = j.view
           setView(v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z) ? { x: v.x, y: v.y, z: Math.max(0.1, Math.min(3, v.z)) } : { x: 0, y: 0, z: 1 })
         }
@@ -1308,7 +1358,7 @@ export default function Page() {
         x: v.x + innerWidth / 2 - (rect.left + rect.width / 2),
         y: v.y + innerHeight / 2 - (rect.top + rect.height / 2)
       }))
-      el.focus()
+      if (editMode) el.focus()
     }, 500)
   }
 
@@ -1346,6 +1396,9 @@ export default function Page() {
                 t={t}
                 isSel={sel === t.id}
                 searchHit={searchHit}
+                isMobile={isMobile}
+                isMobileEditing={editMode === t.id}
+                onSelect={setSel}
                 onStartDrag={startTopic}
                 onFocus={focusTopic}
                 onDup={dup}
@@ -1490,10 +1543,10 @@ export default function Page() {
           <Btn title="Reset" onClick={() => fly({ x: 0, y: 0, z: 1 })}><Home size={16} /></Btn>
         </div>
 
-        {focus && (
-          <button data-ui onClick={() => setFocus(null)}
+        {(focus || editMode) && (
+          <button data-ui onClick={exitEditMode}
             className="absolute top-20 sm:top-3 right-3 flex items-center gap-1 px-3 h-9 bg-white border border-[#DDE4DF] rounded-xl shadow-md text-sm hover:bg-[#F7FAF8]">
-            <X size={14} /> Exit focus
+            <X size={14} /> Exit edit
           </button>
         )}
 
