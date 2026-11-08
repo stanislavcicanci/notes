@@ -16,7 +16,11 @@ const KEY = 'notes-workspace-v38'
 const COLORS = ['#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444', '#202522']
 const TXT_COLORS = ['#202522', '#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444']
 const HIGHLIGHTS = ['#FEF3C7', '#DBEAFE', '#DCFCE7', '#FCE7F3', '#EDE9FE', 'transparent']
+const MIN_Z = 0.1
+const MAX_Z = 3
+const TAP_SLOP = { touch: 8, pen: 8, mouse: 3 } // px of movement before a tap becomes a pan/drag
 const uid = () => Math.random().toString(36).slice(2, 9)
+const clampZ = z => Math.min(MAX_Z, Math.max(MIN_Z, z))
 
 /* ============================================================
    HELPERS & SANITIZER
@@ -153,7 +157,9 @@ function GlobalStyles() {
         }
         * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
         button:focus-visible, input:focus-visible, [contenteditable]:focus-visible { outline: 2px solid #42A879; outline-offset: 2px; }
-        [data-editable] { user-select: text; -webkit-user-select: text; overflow-wrap: anywhere; }
+        [data-editable="true"], [data-editable="true"] * {
+          user-select: text !important; -webkit-user-select: text !important; overflow-wrap: anywhere;
+        }
         body { overflow: hidden; }
         [contenteditable]:empty:before {
           content: attr(data-placeholder);
@@ -473,6 +479,7 @@ function SelectionToolbar() {
   ]
 
   const applyFontSize = (size) => {
+    if (!editableRef.current) return
     document.execCommand('fontSize', false, '7')
     const fontElements = editableRef.current.querySelectorAll('font[size="7"]')
     fontElements.forEach(el => {
@@ -552,10 +559,13 @@ function SelectionToolbar() {
 
 /* ============================================================
    NODE CARD
+   Pointer handling for the card lives ONLY in the canvas gesture
+   engine (Page). The card just exposes data-node so the engine can
+   find it.
    ============================================================ */
 const NodeRow = memo(function NodeRow({
-  t, isSel, searchHit, isMobileEditing, isMobile,
-  onStartDrag, onFocus, onDup, onDelete, onSelect,
+  t, isSel, isFresh, searchHit, isMobileEditing, isMobile,
+  onFocus, onDup, onDelete,
   onChangeColor, onTitleSave, onSubSave, onSubAdd, onSubDelete,
   onNoteAdd, onNoteSave, onNoteDelete, onEditStart,
   onAddRight, onAddBelow
@@ -568,22 +578,18 @@ const NodeRow = memo(function NodeRow({
   return (
     <motion.div
       id={t.id}
+      data-node={t.id}
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.2 }}
-      onPointerDown={(e) => {
-        if (e.target.closest('button') || e.target.closest('[data-editable="true"]')) return
-        if (isMobile && !isMobileEditing) {
-          onSelect(t.id)
-        } else {
-          onStartDrag(e, t)
-        }
-      }}
       onDoubleClick={() => !isMobile && onFocus(t)}
       style={{
         position: 'absolute', left: t.x, top: t.y,
         borderColor: accent,
-        boxShadow: isSel ? `0 0 0 4px ${accent}33` : '0 1px 3px rgba(0,0,0,0.04)',
+        borderWidth: isFresh ? 3 : undefined,
+        boxShadow: isFresh
+          ? `0 0 0 4px ${accent}, 0 0 0 12px ${accent}33`
+          : isSel ? `0 0 0 4px ${accent}33` : '0 1px 3px rgba(0,0,0,0.04)',
         zIndex: isSel ? 20 : 10
       }}
       className={`w-max max-w-[90vw] bg-white ${isComment ? 'border rounded-lg p-3' : 'border-2 rounded-xl p-4'} ${
@@ -598,6 +604,11 @@ const NodeRow = memo(function NodeRow({
         >
           {isComment ? 'Comment' : 'Topic'}
         </span>
+        {isFresh && (
+          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded text-white" style={{ background: accent }}>
+            New
+          </span>
+        )}
         {!titleReady && (
           <span className="text-[9px] text-[#B0B7B2] italic">write a title first…</span>
         )}
@@ -852,7 +863,8 @@ export default function Page() {
   const [tool, setTool] = useState('v')
   const [draft, setDraft] = useState(null)
   const [sel, setSel] = useState(null)
-  const [editMode, setEditMode] = useState(null) 
+  const [fresh, setFresh] = useState(null)       // id of the just-created element (visual confirmation)
+  const [editMode, setEditMode] = useState(null) // "card-edit" state: id of the card being edited
   const [saved, setSaved] = useState(true)
   const [saveError, setSaveError] = useState(false)
   const [anim, setAnim] = useState(false)
@@ -871,13 +883,23 @@ export default function Page() {
   }, [])
 
   const past = useRef([]), future = useRef([])
-  const pointers = useRef(new Map())
-  const gesture = useRef({ type: 'idle', sx: 0, sy: 0, ox: 0, oy: 0, dist: 0, cx: 0, cy: 0, id: null, moved: false })
+  const pointers = useRef(new Map())   // pointerId -> { x, y, type }
+  /*
+    Gesture state machine (mutually exclusive), kept in a ref:
+      idle | card-select | card-drag | background-pan | pinch-zoom | text-create
+    "card-edit" is the React state `editMode`.
+  */
+  const gesture = useRef({ type: 'idle' })
   const cv = useRef(null), dr = useRef(null), fileRef = useRef(null)
   const ready = useRef(false)
   const loadFailed = useRef(false)
   const docR = useRef(doc); docR.current = doc
   const viewR = useRef(view); viewR.current = view
+  // Latest UI values for the (long-lived) gesture listeners, so they are never re-bound mid-gesture.
+  const ui = useRef({}); ui.current = { isMobile, editMode, tool, focus }
+  const pendingReveal = useRef(null)
+  const lastAdd = useRef({ key: '', time: 0 })
+  const freshTimer = useRef(null)
 
   /* ---------- History ---------- */
   const snap = () => {
@@ -907,7 +929,7 @@ export default function Page() {
         setDoc(topics)
         const v = s.view
         if (v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z)) {
-          setView({ x: v.x, y: v.y, z: Math.max(0.1, Math.min(3, v.z)) })
+          setView({ x: v.x, y: v.y, z: Math.max(MIN_Z, Math.min(MAX_Z, v.z)) })
         }
       }
     } catch (err) {
@@ -921,10 +943,11 @@ export default function Page() {
     if (!ready.current || loadFailed.current) return
     setSaved(false)
     setSaveError(false)
-    const payload = JSON.stringify({ app: 'NoteS', version: 38, topics: doc, view })
+    // The payload is built lazily from refs at flush time (no JSON.stringify on every pan/pinch frame).
     const flush = () => {
       if (loadFailed.current) return
       try {
+        const payload = JSON.stringify({ app: 'NoteS', version: 38, topics: docR.current, view: viewR.current })
         localStorage.setItem(KEY, payload)
         setSaved(true)
         setSaveError(false)
@@ -934,24 +957,34 @@ export default function Page() {
         console.error('NoteS local save failed:', err)
       }
     }
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush() }
     const t = setTimeout(flush, 400)
     window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       clearTimeout(t)
       window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [doc, view])
 
   /* ---------- View helpers ---------- */
-  const zoomAt = useCallback((px, py, f) => setView(v => {
-    const z = Math.min(3, Math.max(0.1, v.z * f)), k = z / v.z
-    return { z, x: px - (px - v.x) * k, y: py - (py - v.y) * k }
-  }), [])
-  const zoomC = useCallback(f => zoomAt(innerWidth / 2, innerHeight / 2, f), [zoomAt])
-  const fly = useCallback(v => {
-    setAnim(true); setView(v)
-    setTimeout(() => setAnim(false), 450)
+  // Single entry point for every view change: keeps viewR (always latest) in sync with React state.
+  const setViewSync = useCallback(next => {
+    const v = typeof next === 'function' ? next(viewR.current) : next
+    viewR.current = v
+    setView(v)
   }, [])
+
+  const zoomAt = useCallback((px, py, f) => setViewSync(v => {
+    const z = clampZ(v.z * f), k = z / v.z
+    return { z, x: px - (px - v.x) * k, y: py - (py - v.y) * k }
+  }), [setViewSync])
+  const zoomC = useCallback(f => zoomAt(window.innerWidth / 2, window.innerHeight / 2, f), [zoomAt])
+  const fly = useCallback(v => {
+    setAnim(true); setViewSync(v)
+    setTimeout(() => setAnim(false), 450)
+  }, [setViewSync])
 
   const fit = useCallback(() => {
     if (!docR.current.length) return fly({ x: 0, y: 0, z: 1 })
@@ -962,16 +995,18 @@ export default function Page() {
       a = Math.min(a, t.x); b = Math.min(b, t.y)
       c = Math.max(c, t.x + el.offsetWidth); d = Math.max(d, t.y + el.offsetHeight)
     })
-    const z = Math.min(1.2, (innerWidth - 120) / (c - a), (innerHeight - 200) / (d - b))
+    if (a > c || b > d) return
+    const z = clampZ(Math.min(1.2, (innerWidth - 120) / Math.max(1, c - a), (innerHeight - 200) / Math.max(1, d - b)))
     fly({ z, x: innerWidth / 2 - ((a + c) / 2) * z, y: innerHeight / 2 - ((b + d) / 2) * z })
   }, [fly])
 
   const focusTopic = useCallback(t => {
     setFocus(t.id)
     setEditMode(t.id)
+    setSel(t.id)
     const el = document.getElementById(t.id)
     if (!el) return
-    const z = Math.min(1.3, (innerWidth - 60) / el.offsetWidth, (innerHeight - 140) / el.offsetHeight)
+    const z = clampZ(Math.min(1.3, (innerWidth - 60) / el.offsetWidth, (innerHeight - 140) / el.offsetHeight))
     fly({ z, x: innerWidth / 2 - (t.x + el.offsetWidth / 2) * z, y: innerHeight / 2 - (t.y + el.offsetHeight / 2) * z })
   }, [fly])
 
@@ -1015,40 +1050,74 @@ export default function Page() {
     return COLORS[Math.floor(Math.random() * COLORS.length)]
   }, [])
 
-  /* ---------- Add node ---------- */
-  const addRight = useCallback((afterId) => {
-    const t = docR.current.find(t => t.id === afterId)
-    if (!t) return
-    if (!hasText(t.title)) return
-    const el = document.getElementById(t.id)
-    const w = el ? el.offsetWidth : 400
-    const nt = mkNode(t.x + w + 32, t.y, {
-      color: t.color || G,
-      role: 'comment',
-      lineageId: t.lineageId || t.id
-    })
-    commit(d => [...d, nt])
-  }, [commit])
+  /* ---------- Add node (right / below) ---------- */
+  const markFresh = useCallback(id => {
+    setFresh(id)
+    if (freshTimer.current) clearTimeout(freshTimer.current)
+    freshTimer.current = setTimeout(() => setFresh(null), 3500)
+  }, [])
+  useEffect(() => () => { if (freshTimer.current) clearTimeout(freshTimer.current) }, [])
 
-  const addBelow = useCallback((afterId) => {
-    const t = docR.current.find(t => t.id === afterId)
-    if (!t) return
-    if (!hasText(t.title)) return
+  const addRelative = useCallback((afterId, dir) => {
+    const now = Date.now()
+    const key = `${afterId}:${dir}`
+    // Ignore accidental double taps on the same button.
+    if (lastAdd.current.key === key && now - lastAdd.current.time < 700) return
+    const t = docR.current.find(x => x.id === afterId)
+    if (!t || !hasText(t.title)) return
+    lastAdd.current = { key, time: now }
+
     const el = document.getElementById(t.id)
-    const h = el ? el.offsetHeight : 200
-    const nt = mkNode(t.x, t.y + h + 32, {
-      color: t.color || G,
-      role: 'comment',
-      lineageId: t.lineageId || t.id
-    })
+    const opts = { color: t.color || G, role: 'comment', lineageId: t.lineageId || t.id }
+    const nt = dir === 'right'
+      ? mkNode(t.x + (el ? el.offsetWidth : 400) + 32, t.y, opts)
+      : mkNode(t.x, t.y + (el ? el.offsetHeight : 200) + 32, opts)
+
     commit(d => [...d, nt])
-  }, [commit])
+    setSel(nt.id)
+    markFresh(nt.id)
+    pendingReveal.current = nt.id
+    // In focus/edit mode only the focused card is rendered, so the focus must follow the new card.
+    // On mobile the new card also enters edit mode so its controls are immediately visible.
+    if (ui.current.isMobile || ui.current.focus) {
+      setFocus(nt.id)
+      setEditMode(nt.id)
+    }
+  }, [commit, markFresh])
+
+  const addRight = useCallback(id => addRelative(id, 'right'), [addRelative])
+  const addBelow = useCallback(id => addRelative(id, 'below'), [addRelative])
+
+  // After the new card is in the DOM, bring it to the center of the viewport.
+  useLayoutEffect(() => {
+    const id = pendingReveal.current
+    if (!id) return
+    const t = doc.find(x => x.id === id)
+    const el = document.getElementById(id)
+    if (!t || !el) return
+    pendingReveal.current = null
+    const w = el.offsetWidth, h = el.offsetHeight
+    const fitZ = clampZ(Math.min(1.3, (innerWidth - 60) / w, (innerHeight - 140) / h))
+    const z = Math.min(Math.max(viewR.current.z, Math.min(1, fitZ)), fitZ)
+    fly({ z, x: innerWidth / 2 - (t.x + w / 2) * z, y: innerHeight / 2 - (t.y + h / 2) * z })
+  }, [doc, focus, fly])
 
   const addRootTopic = useCallback((x, y, title = '') => {
     const newColor = getNewTopicColor()
     const nt = mkNode(x, y, { title, color: newColor, role: 'topic' })
     commit(d => [...d, nt])
   }, [commit, getNewTopicColor])
+
+  const confirmDraft = useCallback(() => {
+    const html = sanitizeHtml(dr.current ? dr.current.innerHTML : '')
+    if (draft && hasText(html)) addRootTopic(draft.x, draft.y, html)
+    setDraft(null)
+    setTool('v')
+  }, [draft, addRootTopic])
+
+  useLayoutEffect(() => {
+    if (draft && dr.current) dr.current.focus()
+  }, [draft])
 
   const changeColor = useCallback((id, color) => {
     upd(id, x => {
@@ -1099,168 +1168,245 @@ export default function Page() {
     }))
   }, [upd])
 
+  const onTitleSave = useCallback((id, h) => {
+    setDoc(d => d.map(x => x.id === id ? { ...x, title: sanitizeHtml(h) } : x))
+  }, [])
+
   /* ============================================================
-     TOUCH / POINTER ENGINE (Mașină de stări)
+     POINTER GESTURE ENGINE (single system, Pointer Events only)
+
+     - Every active pointer is tracked in `pointers`.
+     - Pinch is computed ABSOLUTELY from the view captured when the
+       pinch started (no incremental drift, no stale state).
+     - Selection is decided on pointerup (tap), never on pointerdown,
+       so a pan/pinch can never clear or change the selection.
      ============================================================ */
   useEffect(() => {
     const el = cv.current
     if (!el) return
 
+    const idle = () => { gesture.current = { type: 'idle' } }
+    const capture = id => { try { el.setPointerCapture(id) } catch {} }
+    const release = id => { try { if (el.hasPointerCapture(id)) el.releasePointerCapture(id) } catch {} }
+
+    const clearSelection = () => {
+      setSel(null)
+      const u = ui.current
+      if (u.isMobile && (u.editMode || u.focus)) {
+        setFocus(null)
+        setEditMode(null)
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur()
+      }
+    }
+
+    const startPan = (pid, p, moved) => {
+      const v = viewR.current
+      gesture.current = { type: 'background-pan', pid, sx: p.x, sy: p.y, ox: v.x, oy: v.y, moved }
+    }
+    const applyPan = (g, p) => setViewSync(v => ({ ...v, x: g.ox + p.x - g.sx, y: g.oy + p.y - g.sy }))
+
+    const startPinch = () => {
+      const ents = Array.from(pointers.current.entries()).slice(0, 2)
+      if (ents.length < 2) return
+      const [[ia, a], [ib, b]] = ents
+      gesture.current = {
+        type: 'pinch-zoom',
+        ids: [ia, ib],
+        dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+        mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2,
+        v: { ...viewR.current }
+      }
+      capture(ia); capture(ib)
+      setAnim(false)
+    }
+
+    const applyPinch = g => {
+      const a = pointers.current.get(g.ids[0]), b = pointers.current.get(g.ids[1])
+      if (!a || !b) return
+      const dist = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y))
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2
+      const z = clampZ(g.v.z * dist / g.dist)
+      // world point that was under the starting midpoint stays under the current midpoint
+      const wx = (g.mx - g.v.x) / g.v.z, wy = (g.my - g.v.y) / g.v.z
+      setViewSync({ z, x: mx - wx * z, y: my - wy * z })
+    }
+
     const wheel = e => {
       e.preventDefault()
       if (e.ctrlKey || e.metaKey) zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01))
-      else setView(v => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }))
+      else setViewSync(v => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }))
     }
-    el.addEventListener('wheel', wheel, { passive: false })
 
-    const onPointerDown = (e) => {
-      // 1. Protecție UI (Toolbar, Search, etc)
+    const onPointerDown = e => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return
       if (e.target.closest('[data-ui]')) return
-      // 2. Protecție Editare (Dacă ești deja în editMode și atingi textul, lași browserul să pună cursorul)
-      if (editMode && e.target.closest('[data-editable="true"]')) return
 
-      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-      const pts = Array.from(pointers.current.values())
-      const g = gesture.current
+      // A primary pointer means no other touch is down: drop any ghost pointers from a missed pointerup.
+      if (e.isPrimary) { pointers.current.clear(); idle() }
 
-      // 3. Doi degete = ZOOM & PAN
-      if (pts.length === 2) {
-        gesture.current = {
-          type: 'pinch',
-          dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
-          cx: (pts[0].x + pts[1].x) / 2,
-          cy: (pts[0].y + pts[1].y) / 2
-        }
-        if (document.activeElement) document.activeElement.blur()
+      const type = e.pointerType || 'mouse'
+      const p = { x: e.clientX, y: e.clientY, type }
+      pointers.current.set(e.pointerId, p)
+      setAnim(false)
+
+      // Two fingers = pinch, wherever they land (background, card or text field).
+      if (pointers.current.size >= 2) {
+        startPinch()
         return
       }
 
-      // 4. Un deget
-      if (pts.length === 1) {
-        // Unealta T = Creare Text
-        if (tool === 't') {
-          const v = viewR.current
-          const x = (e.clientX - v.x) / v.z
-          const y = (e.clientY - v.y) / v.z
-          setDraft({ x, y })
-          gesture.current = { type: 'idle' }
-          return
-        }
-
-        // Pe mobil, dacă nu ești în editMode, doar selectezi cardul
-        const target = e.target.closest('.cursor-move')
-        if (isMobile && target && !editMode) {
-          gesture.current = { type: 'select', id: target.id }
-          return
-        }
-
-        // Dacă ești în editMode sau pe Desktop, poți trage cardul
-        if (target && (!isMobile || editMode)) {
-          gesture.current = {
-            type: 'drag',
-            id: target.id,
-            sx: e.clientX, sy: e.clientY,
-            ox: parseFloat(target.style.left) || 0,
-            oy: parseFloat(target.style.top) || 0,
-            moved: false
-          }
-          return
-        }
-
-        // Dacă e fundal gol, faci PAN
-        gesture.current = {
-          type: 'pan',
-          sx: e.clientX, sy: e.clientY,
-          ox: viewR.current.x,
-          oy: viewR.current.y
-        }
+      const target = e.target
+      // Buttons and editable text are left entirely to the browser (clicks, caret, selection).
+      if (target.closest('button') || target.closest('[data-editable="true"]')) {
+        idle()
+        return
       }
+
+      const u = ui.current
+      const v = viewR.current
+      const nodeEl = target.closest('[data-node]')
+      const nodeId = nodeEl ? nodeEl.getAttribute('data-node') : null
+      const base = { pid: e.pointerId, sx: p.x, sy: p.y, ox: v.x, oy: v.y, moved: false }
+
+      if (u.tool === 't') {
+        gesture.current = { type: 'text-create', ...base }
+      } else if (nodeId) {
+        const canDrag = !u.isMobile || u.editMode === nodeId
+        if (canDrag) {
+          const node = docR.current.find(t => t.id === nodeId)
+          if (!node) { idle(); return }
+          gesture.current = { type: 'card-drag', ...base, id: nodeId, ox: node.x, oy: node.y }
+        } else {
+          gesture.current = { type: 'card-select', ...base, id: nodeId }
+        }
+      } else {
+        gesture.current = { type: 'background-pan', ...base }
+      }
+      if (type !== 'mouse') capture(e.pointerId) // mouse is captured lazily, so dblclick keeps working
     }
 
-    const onPointerMove = (e) => {
-      if (!pointers.current.has(e.pointerId)) return
-      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-      const pts = Array.from(pointers.current.values())
+    const onPointerMove = e => {
+      const p = pointers.current.get(e.pointerId)
+      if (!p) return
+      p.x = e.clientX; p.y = e.clientY
       const g = gesture.current
 
-      if (pts.length >= 2 && g.type === 'pinch') {
+      if (g.type === 'pinch-zoom') {
+        if (!g.ids.includes(e.pointerId)) return
         e.preventDefault()
-        const [a, b] = pts
-        const dist = Math.hypot(a.x - b.x, a.y - b.y)
-        const cx = (a.x + b.x) / 2
-        const cy = (a.y + b.y) / 2
-        
-        setView(v => {
-          const f = dist / g.dist
-          const z = Math.min(3, Math.max(0.1, v.z * f))
-          const k = z / v.z
-          let nx = cx - (cx - v.x) * k
-          let ny = cy - (cy - v.y) * k
-          nx += cx - g.cx
-          ny += cy - g.cy
-          return { z, x: nx, y: ny }
-        })
-        
-        gesture.current = { ...g, dist, cx, cy }
+        applyPinch(g)
         return
       }
+      if (g.pid !== e.pointerId) return
 
-      if (pts.length === 1) {
-        if (g.type === 'pan') {
-          setView(v => ({ ...v, x: g.ox + e.clientX - g.sx, y: g.oy + e.clientY - g.sy }))
-        } else if (g.type === 'drag') {
-          const z = viewR.current.z
-          const dx = (e.clientX - g.sx) / z
-          const dy = (e.clientY - g.sy) / z
-          if (!g.moved && Math.hypot(dx, dy) > 3) {
-            g.moved = true
+      const dx = p.x - g.sx, dy = p.y - g.sy
+      if (!g.moved && Math.hypot(dx, dy) > (TAP_SLOP[p.type] ?? 8)) {
+        g.moved = true
+        if (p.type === 'mouse') capture(e.pointerId)
+      }
+
+      switch (g.type) {
+        case 'background-pan':
+          applyPan(g, p)
+          break
+        case 'card-select':
+        case 'text-create':
+          // A moving finger on a non-draggable card (or with the text tool) pans the canvas instead.
+          if (g.moved) {
+            gesture.current = { type: 'background-pan', pid: g.pid, sx: g.sx, sy: g.sy, ox: g.ox, oy: g.oy, moved: true }
+            applyPan(gesture.current, p)
+          }
+          break
+        case 'card-drag': {
+          if (!g.moved) break
+          if (!g.snapped) {
+            g.snapped = true
             past.current.push(docR.current)
             if (past.current.length > 100) past.current.shift()
             future.current = []
           }
-          if (g.moved) {
-            setDoc(ds => ds.map(t => t.id === g.id ? { ...t, x: g.ox + dx, y: g.oy + dy } : t))
-          }
+          const z = viewR.current.z
+          setDoc(ds => ds.map(t => t.id === g.id ? { ...t, x: g.ox + dx / z, y: g.oy + dy / z } : t))
+          break
         }
+        default:
       }
     }
 
-    const onPointerUp = (e) => {
+    // Shared end handler: pointerup (cancelled=false), pointercancel / lostpointercapture (cancelled=true)
+    const finish = (e, cancelled) => {
+      const p = pointers.current.get(e.pointerId)
+      if (!p) return
       pointers.current.delete(e.pointerId)
-      const pts = Array.from(pointers.current.values())
+      release(e.pointerId)
       const g = gesture.current
 
-      if (pts.length === 0) {
-        if (g.type === 'select') {
+      if (g.type === 'pinch-zoom') {
+        if (!g.ids.includes(e.pointerId)) return
+        const rest = Array.from(pointers.current.entries())
+        if (rest.length >= 2) startPinch()
+        else if (rest.length === 1) startPan(rest[0][0], rest[0][1], true) // remaining finger pans from where it is: no jump, no tap
+        else idle()
+        return
+      }
+      if (g.pid !== e.pointerId) return
+
+      idle()
+      if (cancelled || g.moved) return
+
+      // A real tap
+      switch (g.type) {
+        case 'card-select':
+        case 'card-drag':
           setSel(g.id)
+          break
+        case 'background-pan':
+          clearSelection()
+          break
+        case 'text-create': {
+          const v = viewR.current
+          setDraft({ x: (g.sx - v.x) / v.z, y: (g.sy - v.y) / v.z })
+          break
         }
-        if (g.type === 'drag' && !g.moved) {
-          setSel(g.id)
-        }
-        gesture.current = { type: 'idle' }
-      } else if (pts.length === 1) {
-        // A ramas un deget -> transformam pinch in pan
-        gesture.current = {
-          type: 'pan',
-          sx: e.clientX, sy: e.clientY,
-          ox: viewR.current.x, oy: viewR.current.y
-        }
+        default:
       }
     }
 
+    const onUp = e => finish(e, false)
+    const onCancel = e => finish(e, true)
+    const onLostCapture = e => {
+      if (!pointers.current.has(e.pointerId)) return
+      if (el.hasPointerCapture && el.hasPointerCapture(e.pointerId)) return // capture merely moved to the canvas
+      finish(e, true)
+    }
+    const reset = () => { pointers.current.clear(); idle() }
+    const onVis = () => { if (document.visibilityState === 'hidden') reset() }
+    const stopGesture = e => e.preventDefault() // iOS Safari proprietary pinch events
+
+    el.addEventListener('wheel', wheel, { passive: false })
     el.addEventListener('pointerdown', onPointerDown)
     el.addEventListener('pointermove', onPointerMove)
-    el.addEventListener('pointerup', onPointerUp)
-    el.addEventListener('pointercancel', onPointerUp)
+    el.addEventListener('pointerup', onUp)
+    el.addEventListener('pointercancel', onCancel)
+    el.addEventListener('lostpointercapture', onLostCapture)
+    el.addEventListener('gesturestart', stopGesture)
+    el.addEventListener('gesturechange', stopGesture)
+    window.addEventListener('blur', reset)
+    document.addEventListener('visibilitychange', onVis)
 
     return () => {
       el.removeEventListener('wheel', wheel)
       el.removeEventListener('pointerdown', onPointerDown)
       el.removeEventListener('pointermove', onPointerMove)
-      el.removeEventListener('pointerup', onPointerUp)
-      el.removeEventListener('pointercancel', onPointerUp)
+      el.removeEventListener('pointerup', onUp)
+      el.removeEventListener('pointercancel', onCancel)
+      el.removeEventListener('lostpointercapture', onLostCapture)
+      el.removeEventListener('gesturestart', stopGesture)
+      el.removeEventListener('gesturechange', stopGesture)
+      window.removeEventListener('blur', reset)
+      document.removeEventListener('visibilitychange', onVis)
     }
-  }, [isMobile, editMode, tool, zoomAt, focusTopic, setSel, setDoc])
+  }, [zoomAt, setViewSync])
 
   /* ---------- Export / Import ---------- */
   const exportJ = () => {
@@ -1288,7 +1434,7 @@ export default function Page() {
           setDoc(topics)
           setSel(null); setFocus(null); setEditMode(null)
           const v = j.view
-          setView(v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z) ? { x: v.x, y: v.y, z: Math.max(0.1, Math.min(3, v.z)) } : { x: 0, y: 0, z: 1 })
+          setViewSync(v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z) ? { x: v.x, y: v.y, z: Math.max(MIN_Z, Math.min(MAX_Z, v.z)) } : { x: 0, y: 0, z: 1 })
         }
       } catch { alert('Invalid NoteS project file.') }
     }
@@ -1324,7 +1470,7 @@ export default function Page() {
       const el = document.getElementById(`editable-${r.id}`)
       if (!el) return
       const rect = el.getBoundingClientRect()
-      setView(v => ({
+      setViewSync(v => ({
         ...v,
         x: v.x + innerWidth / 2 - (rect.left + rect.width / 2),
         y: v.y + innerHeight / 2 - (rect.top + rect.height / 2)
@@ -1344,7 +1490,9 @@ export default function Page() {
         ref={cv}
         className="fixed inset-0 select-none overflow-hidden"
         style={{
-          touchAction: 'pan-x pan-y',
+          // The canvas owns all touch gestures. Taps, caret placement and text selection are not
+          // affected by touch-action, so editable fields keep working.
+          touchAction: 'none',
           cursor: tool === 't' ? 'text' : 'grab',
           backgroundColor: '#fff',
           backgroundImage: 'radial-gradient(circle, #E8EAE8 1.2px, transparent 1.6px)',
@@ -1365,16 +1513,15 @@ export default function Page() {
                 key={t.id}
                 t={t}
                 isSel={sel === t.id}
+                isFresh={fresh === t.id}
                 searchHit={searchHit}
                 isMobile={isMobile}
                 isMobileEditing={editMode === t.id}
-                onSelect={setSel}
-                onStartDrag={() => {}}
                 onFocus={focusTopic}
                 onDup={dup}
                 onDelete={setAsk}
                 onChangeColor={changeColor}
-                onTitleSave={(id, h) => setDoc(d => d.map(x => x.id === id ? { ...x, title: sanitizeHtml(h) } : x))}
+                onTitleSave={onTitleSave}
                 onSubSave={onSubSave}
                 onSubAdd={onSubAdd}
                 onSubDelete={onSubDelete}
@@ -1425,7 +1572,7 @@ export default function Page() {
                 contentEditable
                 suppressContentEditableWarning
                 spellCheck={false}
-                data-editable
+                data-editable="true"
                 onPaste={e => {
                   e.preventDefault()
                   const text = e.clipboardData.getData('text/plain')
