@@ -12,7 +12,7 @@ import {
    CONSTANTS
    ============================================================ */
 const G = '#42A879'
-const KEY = 'notes-workspace-v35'
+const KEY = 'notes-workspace-v37'
 const COLORS = ['#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444', '#202522']
 const TXT_COLORS = ['#202522', '#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444']
 const HIGHLIGHTS = ['#FEF3C7', '#DBEAFE', '#DCFCE7', '#FCE7F3', '#EDE9FE', 'transparent']
@@ -180,7 +180,7 @@ function GlobalStyles() {
 }
 
 /* ============================================================
-   EDITABLE — Doar citește dacă nu ești în modul de editare
+   EDITABLE
    ============================================================ */
 const Editable = memo(function Editable({ html, onSave, onEditStart, targetId, highlighted = false, className = '', placeholder = '', readOnly = false }) {
   const ref = useRef(null)
@@ -551,7 +551,7 @@ function SelectionToolbar() {
 }
 
 /* ============================================================
-   NODE CARD — Modificat pentru Mobile Editing
+   NODE CARD
    ============================================================ */
 const NodeRow = memo(function NodeRow({
   t, isSel, searchHit, isMobileEditing, isMobile,
@@ -565,23 +565,21 @@ const NodeRow = memo(function NodeRow({
   const titlePlaceholder = isComment ? 'Comment…' : 'Topic title…'
   const titleReady = hasText(t.title)
 
-  const wrapperProps = isMobile ? {
-    onPointerDown: (e) => {
-      if (e.target.closest('button') || e.target.closest('[data-editable]')) return
-      onSelect(t.id)
-    }
-  } : {
-    onPointerDown: (e) => onStartDrag(e, t),
-    onDoubleClick: () => onFocus(t)
-  }
-
   return (
     <motion.div
       id={t.id}
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.2 }}
-      {...wrapperProps}
+      onPointerDown={(e) => {
+        if (e.target.closest('button') || e.target.closest('[data-editable="true"]')) return
+        if (isMobile && !isMobileEditing) {
+          onSelect(t.id)
+        } else {
+          onStartDrag(e, t)
+        }
+      }}
+      onDoubleClick={() => !isMobile && onFocus(t)}
       style={{
         position: 'absolute', left: t.x, top: t.y,
         borderColor: accent,
@@ -854,7 +852,7 @@ export default function Page() {
   const [tool, setTool] = useState('v')
   const [draft, setDraft] = useState(null)
   const [sel, setSel] = useState(null)
-  const [editMode, setEditMode] = useState(null) // null = navigare, id = editare
+  const [editMode, setEditMode] = useState(null) 
   const [saved, setSaved] = useState(true)
   const [saveError, setSaveError] = useState(false)
   const [anim, setAnim] = useState(false)
@@ -873,7 +871,9 @@ export default function Page() {
   }, [])
 
   const past = useRef([]), future = useRef([])
-  const drag = useRef(null), space = useRef(false), pinch = useRef(null)
+  const pointers = useRef(new Map()) // Stocheaza pointerii activi
+  const gesture = useRef({ type: 'idle', startX: 0, startY: 0, ox: 0, oy: 0, dist: 0, cx: 0, cy: 0, id: null, moved: false })
+  const space = useRef(false)
   const cv = useRef(null), dr = useRef(null), fileRef = useRef(null)
   const ready = useRef(false)
   const loadFailed = useRef(false)
@@ -922,7 +922,7 @@ export default function Page() {
     if (!ready.current || loadFailed.current) return
     setSaved(false)
     setSaveError(false)
-    const payload = JSON.stringify({ app: 'NoteS', version: 35, topics: doc, view })
+    const payload = JSON.stringify({ app: 'NoteS', version: 37, topics: doc, view })
     const flush = () => {
       if (loadFailed.current) return
       try {
@@ -979,7 +979,6 @@ export default function Page() {
   const exitEditMode = () => {
     setFocus(null)
     setEditMode(null)
-    // Scoatem orice focus de pe text
     if (document.activeElement) document.activeElement.blur()
   }
 
@@ -1102,7 +1101,7 @@ export default function Page() {
   }, [upd])
 
   /* ============================================================
-     TOUCH / POINTER ENGINE (Anti-Crash & Prioritate Zoom)
+     TOUCH / POINTER ENGINE (Unificat cu Pointer Events)
      ============================================================ */
   useEffect(() => {
     const el = cv.current
@@ -1115,173 +1114,163 @@ export default function Page() {
     }
     el.addEventListener('wheel', wheel, { passive: false })
 
-    const move = e => {
-      if (pinch.current) return
-      const d = drag.current
-      if (!d) return
-      if (d.type === 'pan') {
-        setView(v => ({ ...v, x: d.ox + e.clientX - d.sx, y: d.oy + e.clientY - d.sy }))
-      } else if (d.type === 'topic') {
-        const z = viewR.current.z
-        const dx = (e.clientX - d.sx) / z, dy = (e.clientY - d.sy) / z
-        if (!d.moved && Math.hypot(dx, dy) > 3) {
-          d.moved = true
-          past.current.push(docR.current)
-          if (past.current.length > 100) past.current.shift()
-          future.current = []
-        }
-        if (d.moved) setDoc(ds => ds.map(t => t.id === d.id ? { ...t, x: d.ox + dx, y: d.oy + dy } : t))
-      }
-    }
+    const onPointerDown = (e) => {
+      if (e.target.closest('[data-ui]')) return
+      
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      const pts = Array.from(pointers.current.values())
 
-    const up = () => {
-      if (pinch.current) return
-      const d = drag.current
-      drag.current = null
-      if (d?.type === 'topic' && d.moved === false) setSel(d.id)
-    }
-
-    const tstart = e => {
-      if (e.touches.length >= 2) {
-        drag.current = null
-        const active = document.activeElement
-        if (active && active.isContentEditable) active.blur()
-        
-        const [a, b] = e.touches
-        pinch.current = {
-          dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
-          cx: (a.clientX + b.clientX) / 2,
-          cy: (a.clientY + b.clientY) / 2,
+      // 2 degete = ZOOM / PAN
+      if (pts.length === 2) {
+        gesture.current = {
+          type: 'pinch',
+          dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
+          cx: (pts[0].x + pts[1].x) / 2,
+          cy: (pts[0].y + pts[1].y) / 2,
           ox: viewR.current.x,
           oy: viewR.current.y
         }
-      }
-    }
-
-    const tmove = e => {
-      if (!pinch.current || !e.touches || e.touches.length < 2) return
-      e.preventDefault()
-      
-      const [a, b] = e.touches
-      const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
-      const cx = (a.clientX + b.clientX) / 2
-      const cy = (a.clientY + b.clientY) / 2
-      
-      const f = dist / pinch.current.dist
-      const z = Math.min(3, Math.max(0.1, viewR.current.z * f))
-      
-      setView(v => {
-        const k = z / v.z
-        let nx = cx - (cx - v.x) * k
-        let ny = cy - (cy - v.y) * k
-        nx += cx - pinch.current.cx
-        ny += cy - pinch.current.cy
-        return { z, x: nx, y: ny }
-      })
-      
-      pinch.current = { ...pinch.current, dist, cx, cy }
-    }
-
-    const tend = e => { 
-      if (!e.touches || e.touches.length < 2) { 
-        pinch.current = null
-        drag.current = null 
-      } 
-    }
-
-    const key = e => {
-      const ed = e.target.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)
-      if (e.key === 'Escape' && showSearch) { setShowSearch(false); setSearch(''); e.preventDefault(); return }
-      if (e.code === 'Space' && !ed) { space.current = true; e.preventDefault() }
-      if (ed) {
-        if (e.key === 'Escape') e.target.blur()
+        if (document.activeElement) document.activeElement.blur()
         return
       }
-      const m = e.ctrlKey || e.metaKey, k = e.key.toLowerCase()
-      if (m && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo() }
-      else if (m && (k === '=' || k === '+')) { e.preventDefault(); zoomC(1.2) }
-      else if (m && k === '-') { e.preventDefault(); zoomC(1 / 1.2) }
-      else if (m && k === '0') { e.preventDefault(); fly({ x: 0, y: 0, z: 1 }) }
-      else if (m && k === 'f') { e.preventDefault(); setShowSearch(true) }
-      else if (m && k === 'd') {
-        e.preventDefault()
-        setSel(s => { const t = docR.current.find(t => t.id === s); if (t) dup(t); return s })
-      }
-      else if (!m && k === 't') { setTool('t'); setSel(null) }
-      else if (!m && k === 'v') setTool('v')
-      else if (!m && k === 'f') {
-        setFocus(f => {
-          if (f) return null
-          const t = docR.current.find(t => t.id === sel)
-          if (t) { focusTopic(t); return t.id }
-          return null
-        })
-      }
-      else if (k === 'delete' || k === 'backspace') { if (sel) setAsk(sel) }
-      else if (k === 'escape') {
-        setAsk(null); setDraft(null); setSel(null); setTool('v')
-        setFocus(null); setShowSearch(false); setEditMode(null)
+
+      // 1 deget = Evaluam tinta
+      if (pts.length === 1) {
+        const target = e.target.closest('[data-editable="true"]') ? null : e.target.closest('.cursor-move')
+        
+        if (isMobile && target && !editMode) {
+          // Daca atingem un card si nu suntem in edit mode, doar selectam
+          gesture.current = { type: 'select' }
+          return
+        }
+        
+        if (target) {
+          gesture.current = {
+            type: 'drag',
+            id: target.id,
+            sx: e.clientX, sy: e.clientY,
+            ox: parseFloat(target.style.left) || 0,
+            oy: parseFloat(target.style.top) || 0,
+            moved: false
+          }
+        } else {
+          gesture.current = {
+            type: 'pan',
+            sx: e.clientX, sy: e.clientY,
+            ox: viewR.current.x,
+            oy: viewR.current.y
+          }
+        }
       }
     }
-    const keyup = e => { if (e.code === 'Space') space.current = false }
 
-    addEventListener('pointermove', move)
-    addEventListener('pointerup', up)
-    addEventListener('pointercancel', up)
-    addEventListener('keydown', key)
-    addEventListener('keyup', keyup)
-    el.addEventListener('touchstart', tstart, { passive: true })
-    el.addEventListener('touchmove', tmove, { passive: false })
-    el.addEventListener('touchend', tend, { passive: true })
-    el.addEventListener('touchcancel', tend, { passive: true })
+    const onPointerMove = (e) => {
+      if (!pointers.current.has(e.pointerId)) return
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      const pts = Array.from(pointers.current.values())
+      const g = gesture.current
+
+      if (pts.length >= 2 && g.type === 'pinch') {
+        e.preventDefault()
+        const [a, b] = pts
+        const dist = Math.hypot(a.x - b.x, a.y - b.y)
+        const cx = (a.x + b.x) / 2
+        const cy = (a.y + b.y) / 2
+        const f = dist / g.dist
+        const z = Math.min(3, Math.max(0.1, viewR.current.z * f))
+        
+        setView(v => {
+          const k = z / v.z
+          let nx = cx - (cx - v.x) * k
+          let ny = cy - (cy - v.y) * k
+          nx += cx - g.cx
+          ny += cy - g.cy
+          return { z, x: nx, y: ny }
+        })
+        
+        gesture.current = { ...g, dist, cx, cy }
+        return
+      }
+
+      if (pts.length === 1) {
+        if (g.type === 'pan') {
+          setView(v => ({ ...v, x: g.ox + e.clientX - g.sx, y: g.oy + e.clientY - g.sy }))
+        } else if (g.type === 'drag') {
+          const z = viewR.current.z
+          const dx = (e.clientX - g.sx) / z
+          const dy = (e.clientY - g.sy) / z
+          if (!g.moved && Math.hypot(dx, dy) > 3) {
+            g.moved = true
+            past.current.push(docR.current)
+            if (past.current.length > 100) past.current.shift()
+            future.current = []
+          }
+          if (g.moved) {
+            setDoc(ds => ds.map(t => t.id === g.id ? { ...t, x: g.ox + dx, y: g.oy + dy } : t))
+          }
+        }
+      }
+    }
+
+    const onPointerUp = (e) => {
+      pointers.current.delete(e.pointerId)
+      const pts = Array.from(pointers.current.values())
+      const g = gesture.current
+
+      if (pts.length === 0) {
+        if (g.type === 'select') {
+          const target = e.target.closest('.cursor-move')
+          if (target) setSel(target.id)
+        }
+        if (g.type === 'drag' && !g.moved) {
+          setSel(g.id)
+        }
+        gesture.current = { type: 'idle' }
+      } else if (pts.length === 1) {
+        // A ramas un deget - transformam pinch-ul in pan
+        gesture.current = {
+          type: 'pan',
+          sx: e.clientX, sy: e.clientY,
+          ox: viewR.current.x, oy: viewR.current.y
+        }
+      }
+    }
+
+    el.addEventListener('pointerdown', onPointerDown)
+    el.addEventListener('pointermove', onPointerMove)
+    el.addEventListener('pointerup', onPointerUp)
+    el.addEventListener('pointercancel', onPointerUp)
+    el.addEventListener('pointerleave', onPointerUp)
 
     return () => {
       el.removeEventListener('wheel', wheel)
-      el.removeEventListener('touchstart', tstart)
-      el.removeEventListener('touchmove', tmove)
-      el.removeEventListener('touchend', tend)
-      el.removeEventListener('touchcancel', tend)
-      removeEventListener('pointermove', move)
-      removeEventListener('pointerup', up)
-      removeEventListener('pointercancel', up)
-      removeEventListener('keydown', key)
-      removeEventListener('keyup', keyup)
+      el.removeEventListener('pointerdown', onPointerDown)
+      el.removeEventListener('pointermove', onPointerMove)
+      el.removeEventListener('pointerup', onPointerUp)
+      el.removeEventListener('pointercancel', onPointerUp)
+      el.removeEventListener('pointerleave', onPointerUp)
     }
-  }, [sel, undo, redo, zoomC, zoomAt, fly, dup, focusTopic, showSearch])
+  }, [isMobile, editMode, zoomAt, focusTopic, setSel, setDoc])
 
   const down = e => {
     if (e.target.closest('[data-ui]')) return
-    if (e.target.closest('[data-editable]') && !isMobile) return
+    if (e.target.closest('[data-editable="true"]') && !isMobile) return
 
     if (isMobile) {
-      if (e.target.closest('[data-editable]') && editMode) return
+      if (e.target.closest('[data-editable="true"]') && editMode) return
       setSel(null)
+      setEditMode(null)
     } else {
       const active = document.activeElement
       if (active && active.isContentEditable) active.blur()
-      if (e.target.closest('[data-editable]')) return
+      if (e.target.closest('[data-editable="true"]')) return
     }
-
-    if (e.button === 1) {
-      e.preventDefault()
-      drag.current = { type: 'pan', sx: e.clientX, sy: e.clientY, ox: viewR.current.x, oy: viewR.current.y }
-      return
-    }
-    const v = viewR.current
-    if (tool === 't' && e.button === 0 && !space.current) {
-      setDraft({ x: (e.clientX - v.x) / v.z, y: (e.clientY - v.y) / v.z })
-      return
-    }
-    setDraft(null)
-    drag.current = { type: 'pan', sx: e.clientX, sy: e.clientY, ox: v.x, oy: v.y }
   }
 
   const startTopic = (e, t) => {
     if (e.target.closest('button') || e.target.isContentEditable) { e.stopPropagation(); return }
-    if (pinch.current) return
     e.stopPropagation()
     if (!isMobile) setSel(t.id)
-    drag.current = { type: 'topic', id: t.id, sx: e.clientX, sy: e.clientY, ox: t.x, oy: t.y, moved: false }
   }
 
   const confirmDraft = () => {
@@ -1294,7 +1283,7 @@ export default function Page() {
   /* ---------- Export / Import ---------- */
   const exportJ = () => {
     const b = new Blob(
-      [JSON.stringify({ app: 'NoteS', version: 35, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
+      [JSON.stringify({ app: 'NoteS', version: 37, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
       { type: 'application/json' }
     )
     const a = document.createElement('a')
@@ -1309,7 +1298,7 @@ export default function Page() {
     r.onload = () => {
       try {
         const j = JSON.parse(r.result)
-        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 35)) throw 0
+        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 37)) throw 0
         if (confirm('Replace the current workspace with this project?')) {
           snap()
           const topics = normalizeProjectTopics(j.topics)
@@ -1374,8 +1363,8 @@ export default function Page() {
         onPointerDown={down}
         className="fixed inset-0 select-none overflow-hidden"
         style={{
-          touchAction: 'none',
-          cursor: tool === 't' ? 'text' : drag.current?.type === 'pan' ? 'grabbing' : 'grab',
+          touchAction: 'pan-x pan-y',
+          cursor: tool === 't' ? 'text' : 'grab',
           backgroundColor: '#fff',
           backgroundImage: 'radial-gradient(circle, #E8EAE8 1.2px, transparent 1.6px)',
           backgroundSize: `${24 * view.z}px ${24 * view.z}px`,
