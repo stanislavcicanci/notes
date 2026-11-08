@@ -12,7 +12,7 @@ import {
    CONSTANTS
    ============================================================ */
 const G = '#42A879'
-const KEY = 'notes-workspace-v37'
+const KEY = 'notes-workspace-v38'
 const COLORS = ['#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444', '#202522']
 const TXT_COLORS = ['#202522', '#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444']
 const HIGHLIGHTS = ['#FEF3C7', '#DBEAFE', '#DCFCE7', '#FCE7F3', '#EDE9FE', 'transparent']
@@ -871,9 +871,8 @@ export default function Page() {
   }, [])
 
   const past = useRef([]), future = useRef([])
-  const pointers = useRef(new Map()) // Stocheaza pointerii activi
-  const gesture = useRef({ type: 'idle', startX: 0, startY: 0, ox: 0, oy: 0, dist: 0, cx: 0, cy: 0, id: null, moved: false })
-  const space = useRef(false)
+  const pointers = useRef(new Map())
+  const gesture = useRef({ type: 'idle', sx: 0, sy: 0, ox: 0, oy: 0, dist: 0, cx: 0, cy: 0, id: null, moved: false })
   const cv = useRef(null), dr = useRef(null), fileRef = useRef(null)
   const ready = useRef(false)
   const loadFailed = useRef(false)
@@ -922,7 +921,7 @@ export default function Page() {
     if (!ready.current || loadFailed.current) return
     setSaved(false)
     setSaveError(false)
-    const payload = JSON.stringify({ app: 'NoteS', version: 37, topics: doc, view })
+    const payload = JSON.stringify({ app: 'NoteS', version: 38, topics: doc, view })
     const flush = () => {
       if (loadFailed.current) return
       try {
@@ -969,7 +968,7 @@ export default function Page() {
 
   const focusTopic = useCallback(t => {
     setFocus(t.id)
-    setEditMode(t.id) // Activăm modul de editare
+    setEditMode(t.id)
     const el = document.getElementById(t.id)
     if (!el) return
     const z = Math.min(1.3, (innerWidth - 60) / el.offsetWidth, (innerHeight - 140) / el.offsetHeight)
@@ -1101,7 +1100,7 @@ export default function Page() {
   }, [upd])
 
   /* ============================================================
-     TOUCH / POINTER ENGINE (Unificat cu Pointer Events)
+     TOUCH / POINTER ENGINE (Mașină de stări)
      ============================================================ */
   useEffect(() => {
     const el = cv.current
@@ -1115,36 +1114,48 @@ export default function Page() {
     el.addEventListener('wheel', wheel, { passive: false })
 
     const onPointerDown = (e) => {
+      // 1. Protecție UI (Toolbar, Search, etc)
       if (e.target.closest('[data-ui]')) return
-      
+      // 2. Protecție Editare (Dacă ești deja în editMode și atingi textul, lași browserul să pună cursorul)
+      if (editMode && e.target.closest('[data-editable="true"]')) return
+
       pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
       const pts = Array.from(pointers.current.values())
+      const g = gesture.current
 
-      // 2 degete = ZOOM / PAN
+      // 3. Doi degete = ZOOM & PAN
       if (pts.length === 2) {
         gesture.current = {
           type: 'pinch',
           dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
           cx: (pts[0].x + pts[1].x) / 2,
-          cy: (pts[0].y + pts[1].y) / 2,
-          ox: viewR.current.x,
-          oy: viewR.current.y
+          cy: (pts[0].y + pts[1].y) / 2
         }
         if (document.activeElement) document.activeElement.blur()
         return
       }
 
-      // 1 deget = Evaluam tinta
+      // 4. Un deget
       if (pts.length === 1) {
-        const target = e.target.closest('[data-editable="true"]') ? null : e.target.closest('.cursor-move')
-        
-        if (isMobile && target && !editMode) {
-          // Daca atingem un card si nu suntem in edit mode, doar selectam
-          gesture.current = { type: 'select' }
+        // Unealta T = Creare Text
+        if (tool === 't') {
+          const v = viewR.current
+          const x = (e.clientX - v.x) / v.z
+          const y = (e.clientY - v.y) / v.z
+          setDraft({ x, y })
+          gesture.current = { type: 'idle' }
           return
         }
-        
-        if (target) {
+
+        // Pe mobil, dacă nu ești în editMode, doar selectezi cardul
+        const target = e.target.closest('.cursor-move')
+        if (isMobile && target && !editMode) {
+          gesture.current = { type: 'select', id: target.id }
+          return
+        }
+
+        // Dacă ești în editMode sau pe Desktop, poți trage cardul
+        if (target && (!isMobile || editMode)) {
           gesture.current = {
             type: 'drag',
             id: target.id,
@@ -1153,13 +1164,15 @@ export default function Page() {
             oy: parseFloat(target.style.top) || 0,
             moved: false
           }
-        } else {
-          gesture.current = {
-            type: 'pan',
-            sx: e.clientX, sy: e.clientY,
-            ox: viewR.current.x,
-            oy: viewR.current.y
-          }
+          return
+        }
+
+        // Dacă e fundal gol, faci PAN
+        gesture.current = {
+          type: 'pan',
+          sx: e.clientX, sy: e.clientY,
+          ox: viewR.current.x,
+          oy: viewR.current.y
         }
       }
     }
@@ -1176,10 +1189,10 @@ export default function Page() {
         const dist = Math.hypot(a.x - b.x, a.y - b.y)
         const cx = (a.x + b.x) / 2
         const cy = (a.y + b.y) / 2
-        const f = dist / g.dist
-        const z = Math.min(3, Math.max(0.1, viewR.current.z * f))
         
         setView(v => {
+          const f = dist / g.dist
+          const z = Math.min(3, Math.max(0.1, v.z * f))
           const k = z / v.z
           let nx = cx - (cx - v.x) * k
           let ny = cy - (cy - v.y) * k
@@ -1219,15 +1232,14 @@ export default function Page() {
 
       if (pts.length === 0) {
         if (g.type === 'select') {
-          const target = e.target.closest('.cursor-move')
-          if (target) setSel(target.id)
+          setSel(g.id)
         }
         if (g.type === 'drag' && !g.moved) {
           setSel(g.id)
         }
         gesture.current = { type: 'idle' }
       } else if (pts.length === 1) {
-        // A ramas un deget - transformam pinch-ul in pan
+        // A ramas un deget -> transformam pinch in pan
         gesture.current = {
           type: 'pan',
           sx: e.clientX, sy: e.clientY,
@@ -1240,7 +1252,6 @@ export default function Page() {
     el.addEventListener('pointermove', onPointerMove)
     el.addEventListener('pointerup', onPointerUp)
     el.addEventListener('pointercancel', onPointerUp)
-    el.addEventListener('pointerleave', onPointerUp)
 
     return () => {
       el.removeEventListener('wheel', wheel)
@@ -1248,42 +1259,13 @@ export default function Page() {
       el.removeEventListener('pointermove', onPointerMove)
       el.removeEventListener('pointerup', onPointerUp)
       el.removeEventListener('pointercancel', onPointerUp)
-      el.removeEventListener('pointerleave', onPointerUp)
     }
-  }, [isMobile, editMode, zoomAt, focusTopic, setSel, setDoc])
-
-  const down = e => {
-    if (e.target.closest('[data-ui]')) return
-    if (e.target.closest('[data-editable="true"]') && !isMobile) return
-
-    if (isMobile) {
-      if (e.target.closest('[data-editable="true"]') && editMode) return
-      setSel(null)
-      setEditMode(null)
-    } else {
-      const active = document.activeElement
-      if (active && active.isContentEditable) active.blur()
-      if (e.target.closest('[data-editable="true"]')) return
-    }
-  }
-
-  const startTopic = (e, t) => {
-    if (e.target.closest('button') || e.target.isContentEditable) { e.stopPropagation(); return }
-    e.stopPropagation()
-    if (!isMobile) setSel(t.id)
-  }
-
-  const confirmDraft = () => {
-    const h = dr.current?.innerHTML.trim(), txt = dr.current?.innerText.trim()
-    if (txt) addRootTopic(draft.x, draft.y, sanitizeHtml(h))
-    setDraft(null); setTool('v')
-  }
-  useEffect(() => { if (draft) dr.current?.focus() }, [draft])
+  }, [isMobile, editMode, tool, zoomAt, focusTopic, setSel, setDoc])
 
   /* ---------- Export / Import ---------- */
   const exportJ = () => {
     const b = new Blob(
-      [JSON.stringify({ app: 'NoteS', version: 37, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
+      [JSON.stringify({ app: 'NoteS', version: 38, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
       { type: 'application/json' }
     )
     const a = document.createElement('a')
@@ -1298,7 +1280,7 @@ export default function Page() {
     r.onload = () => {
       try {
         const j = JSON.parse(r.result)
-        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 37)) throw 0
+        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 38)) throw 0
         if (confirm('Replace the current workspace with this project?')) {
           snap()
           const topics = normalizeProjectTopics(j.topics)
@@ -1360,7 +1342,6 @@ export default function Page() {
       <SelectionToolbar />
       <div
         ref={cv}
-        onPointerDown={down}
         className="fixed inset-0 select-none overflow-hidden"
         style={{
           touchAction: 'pan-x pan-y',
@@ -1388,7 +1369,7 @@ export default function Page() {
                 isMobile={isMobile}
                 isMobileEditing={editMode === t.id}
                 onSelect={setSel}
-                onStartDrag={startTopic}
+                onStartDrag={() => {}}
                 onFocus={focusTopic}
                 onDup={dup}
                 onDelete={setAsk}
