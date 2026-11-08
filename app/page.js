@@ -12,13 +12,13 @@ import {
    CONSTANTS
    ============================================================ */
 const G = '#42A879'
-const KEY = 'notes-workspace-v38'
+const KEY = 'notes-workspace-v39'
 const COLORS = ['#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444', '#202522']
 const TXT_COLORS = ['#202522', '#42A879', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444']
 const HIGHLIGHTS = ['#FEF3C7', '#DBEAFE', '#DCFCE7', '#FCE7F3', '#EDE9FE', 'transparent']
 const MIN_Z = 0.1
 const MAX_Z = 3
-const TAP_SLOP = { touch: 8, pen: 8, mouse: 3 } // px of movement before a tap becomes a pan/drag
+const TAP_SLOP = { touch: 8, pen: 8, mouse: 3 }
 const uid = () => Math.random().toString(36).slice(2, 9)
 const clampZ = z => Math.min(MAX_Z, Math.max(MIN_Z, z))
 
@@ -559,9 +559,6 @@ function SelectionToolbar() {
 
 /* ============================================================
    NODE CARD
-   Pointer handling for the card lives ONLY in the canvas gesture
-   engine (Page). The card just exposes data-node so the engine can
-   find it.
    ============================================================ */
 const NodeRow = memo(function NodeRow({
   t, isSel, isFresh, searchHit, isMobileEditing, isMobile,
@@ -863,8 +860,8 @@ export default function Page() {
   const [tool, setTool] = useState('v')
   const [draft, setDraft] = useState(null)
   const [sel, setSel] = useState(null)
-  const [fresh, setFresh] = useState(null)       // id of the just-created element (visual confirmation)
-  const [editMode, setEditMode] = useState(null) // "card-edit" state: id of the card being edited
+  const [fresh, setFresh] = useState(null)
+  const [editMode, setEditMode] = useState(null) 
   const [saved, setSaved] = useState(true)
   const [saveError, setSaveError] = useState(false)
   const [anim, setAnim] = useState(false)
@@ -883,19 +880,13 @@ export default function Page() {
   }, [])
 
   const past = useRef([]), future = useRef([])
-  const pointers = useRef(new Map())   // pointerId -> { x, y, type }
-  /*
-    Gesture state machine (mutually exclusive), kept in a ref:
-      idle | card-select | card-drag | background-pan | pinch-zoom | text-create
-    "card-edit" is the React state `editMode`.
-  */
+  const pointers = useRef(new Map())
   const gesture = useRef({ type: 'idle' })
   const cv = useRef(null), dr = useRef(null), fileRef = useRef(null)
   const ready = useRef(false)
   const loadFailed = useRef(false)
   const docR = useRef(doc); docR.current = doc
   const viewR = useRef(view); viewR.current = view
-  // Latest UI values for the (long-lived) gesture listeners, so they are never re-bound mid-gesture.
   const ui = useRef({}); ui.current = { isMobile, editMode, tool, focus }
   const pendingReveal = useRef(null)
   const lastAdd = useRef({ key: '', time: 0 })
@@ -943,11 +934,10 @@ export default function Page() {
     if (!ready.current || loadFailed.current) return
     setSaved(false)
     setSaveError(false)
-    // The payload is built lazily from refs at flush time (no JSON.stringify on every pan/pinch frame).
     const flush = () => {
       if (loadFailed.current) return
       try {
-        const payload = JSON.stringify({ app: 'NoteS', version: 38, topics: docR.current, view: viewR.current })
+        const payload = JSON.stringify({ app: 'NoteS', version: 39, topics: docR.current, view: viewR.current })
         localStorage.setItem(KEY, payload)
         setSaved(true)
         setSaveError(false)
@@ -969,7 +959,6 @@ export default function Page() {
   }, [doc, view])
 
   /* ---------- View helpers ---------- */
-  // Single entry point for every view change: keeps viewR (always latest) in sync with React state.
   const setViewSync = useCallback(next => {
     const v = typeof next === 'function' ? next(viewR.current) : next
     viewR.current = v
@@ -1061,7 +1050,6 @@ export default function Page() {
   const addRelative = useCallback((afterId, dir) => {
     const now = Date.now()
     const key = `${afterId}:${dir}`
-    // Ignore accidental double taps on the same button.
     if (lastAdd.current.key === key && now - lastAdd.current.time < 700) return
     const t = docR.current.find(x => x.id === afterId)
     if (!t || !hasText(t.title)) return
@@ -1077,8 +1065,6 @@ export default function Page() {
     setSel(nt.id)
     markFresh(nt.id)
     pendingReveal.current = nt.id
-    // In focus/edit mode only the focused card is rendered, so the focus must follow the new card.
-    // On mobile the new card also enters edit mode so its controls are immediately visible.
     if (ui.current.isMobile || ui.current.focus) {
       setFocus(nt.id)
       setEditMode(nt.id)
@@ -1088,7 +1074,6 @@ export default function Page() {
   const addRight = useCallback(id => addRelative(id, 'right'), [addRelative])
   const addBelow = useCallback(id => addRelative(id, 'below'), [addRelative])
 
-  // After the new card is in the DOM, bring it to the center of the viewport.
   useLayoutEffect(() => {
     const id = pendingReveal.current
     if (!id) return
@@ -1102,11 +1087,21 @@ export default function Page() {
     fly({ z, x: innerWidth / 2 - (t.x + w / 2) * z, y: innerHeight / 2 - (t.y + h / 2) * z })
   }, [doc, focus, fly])
 
+  // FIX: New topic
   const addRootTopic = useCallback((x, y, title = '') => {
     const newColor = getNewTopicColor()
     const nt = mkNode(x, y, { title, color: newColor, role: 'topic' })
     commit(d => [...d, nt])
-  }, [commit, getNewTopicColor])
+    
+    // Select, mark fresh, and enter edit mode
+    setSel(nt.id)
+    markFresh(nt.id)
+    pendingReveal.current = nt.id
+    if (isMobile) {
+      setFocus(nt.id)
+      setEditMode(nt.id)
+    }
+  }, [commit, getNewTopicColor, isMobile, markFresh])
 
   const confirmDraft = useCallback(() => {
     const html = sanitizeHtml(dr.current ? dr.current.innerHTML : '')
@@ -1173,13 +1168,7 @@ export default function Page() {
   }, [])
 
   /* ============================================================
-     POINTER GESTURE ENGINE (single system, Pointer Events only)
-
-     - Every active pointer is tracked in `pointers`.
-     - Pinch is computed ABSOLUTELY from the view captured when the
-       pinch started (no incremental drift, no stale state).
-     - Selection is decided on pointerup (tap), never on pointerdown,
-       so a pan/pinch can never clear or change the selection.
+     POINTER GESTURE ENGINE
      ============================================================ */
   useEffect(() => {
     const el = cv.current
@@ -1226,7 +1215,6 @@ export default function Page() {
       const dist = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y))
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2
       const z = clampZ(g.v.z * dist / g.dist)
-      // world point that was under the starting midpoint stays under the current midpoint
       const wx = (g.mx - g.v.x) / g.v.z, wy = (g.my - g.v.y) / g.v.z
       setViewSync({ z, x: mx - wx * z, y: my - wy * z })
     }
@@ -1241,7 +1229,6 @@ export default function Page() {
       if (e.pointerType === 'mouse' && e.button !== 0) return
       if (e.target.closest('[data-ui]')) return
 
-      // A primary pointer means no other touch is down: drop any ghost pointers from a missed pointerup.
       if (e.isPrimary) { pointers.current.clear(); idle() }
 
       const type = e.pointerType || 'mouse'
@@ -1249,14 +1236,12 @@ export default function Page() {
       pointers.current.set(e.pointerId, p)
       setAnim(false)
 
-      // Two fingers = pinch, wherever they land (background, card or text field).
       if (pointers.current.size >= 2) {
         startPinch()
         return
       }
 
       const target = e.target
-      // Buttons and editable text are left entirely to the browser (clicks, caret, selection).
       if (target.closest('button') || target.closest('[data-editable="true"]')) {
         idle()
         return
@@ -1282,7 +1267,7 @@ export default function Page() {
       } else {
         gesture.current = { type: 'background-pan', ...base }
       }
-      if (type !== 'mouse') capture(e.pointerId) // mouse is captured lazily, so dblclick keeps working
+      if (type !== 'mouse') capture(e.pointerId)
     }
 
     const onPointerMove = e => {
@@ -1311,7 +1296,6 @@ export default function Page() {
           break
         case 'card-select':
         case 'text-create':
-          // A moving finger on a non-draggable card (or with the text tool) pans the canvas instead.
           if (g.moved) {
             gesture.current = { type: 'background-pan', pid: g.pid, sx: g.sx, sy: g.sy, ox: g.ox, oy: g.oy, moved: true }
             applyPan(gesture.current, p)
@@ -1333,7 +1317,6 @@ export default function Page() {
       }
     }
 
-    // Shared end handler: pointerup (cancelled=false), pointercancel / lostpointercapture (cancelled=true)
     const finish = (e, cancelled) => {
       const p = pointers.current.get(e.pointerId)
       if (!p) return
@@ -1345,7 +1328,7 @@ export default function Page() {
         if (!g.ids.includes(e.pointerId)) return
         const rest = Array.from(pointers.current.entries())
         if (rest.length >= 2) startPinch()
-        else if (rest.length === 1) startPan(rest[0][0], rest[0][1], true) // remaining finger pans from where it is: no jump, no tap
+        else if (rest.length === 1) startPan(rest[0][0], rest[0][1], true)
         else idle()
         return
       }
@@ -1354,7 +1337,6 @@ export default function Page() {
       idle()
       if (cancelled || g.moved) return
 
-      // A real tap
       switch (g.type) {
         case 'card-select':
         case 'card-drag':
@@ -1376,12 +1358,12 @@ export default function Page() {
     const onCancel = e => finish(e, true)
     const onLostCapture = e => {
       if (!pointers.current.has(e.pointerId)) return
-      if (el.hasPointerCapture && el.hasPointerCapture(e.pointerId)) return // capture merely moved to the canvas
+      if (el.hasPointerCapture && el.hasPointerCapture(e.pointerId)) return
       finish(e, true)
     }
     const reset = () => { pointers.current.clear(); idle() }
     const onVis = () => { if (document.visibilityState === 'hidden') reset() }
-    const stopGesture = e => e.preventDefault() // iOS Safari proprietary pinch events
+    const stopGesture = e => e.preventDefault()
 
     el.addEventListener('wheel', wheel, { passive: false })
     el.addEventListener('pointerdown', onPointerDown)
@@ -1411,7 +1393,7 @@ export default function Page() {
   /* ---------- Export / Import ---------- */
   const exportJ = () => {
     const b = new Blob(
-      [JSON.stringify({ app: 'NoteS', version: 38, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
+      [JSON.stringify({ app: 'NoteS', version: 39, savedAt: new Date().toISOString(), topics: doc, view }, null, 2)],
       { type: 'application/json' }
     )
     const a = document.createElement('a')
@@ -1426,7 +1408,7 @@ export default function Page() {
     r.onload = () => {
       try {
         const j = JSON.parse(r.result)
-        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 38)) throw 0
+        if (j.app !== 'NoteS' || !Array.isArray(j.topics) || (j.version != null && j.version !== 39)) throw 0
         if (confirm('Replace the current workspace with this project?')) {
           snap()
           const topics = normalizeProjectTopics(j.topics)
@@ -1490,8 +1472,6 @@ export default function Page() {
         ref={cv}
         className="fixed inset-0 select-none overflow-hidden"
         style={{
-          // The canvas owns all touch gestures. Taps, caret placement and text selection are not
-          // affected by touch-action, so editable fields keep working.
           touchAction: 'none',
           cursor: tool === 't' ? 'text' : 'grab',
           backgroundColor: '#fff',
